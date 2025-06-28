@@ -96,7 +96,10 @@ class ClassSelect(Select):
                 ephemeral=True
             )
             await asyncio.sleep(10)
-            await interaction.delete_original_response()
+            try:
+                await interaction.delete_original_response()
+            except:
+                pass
             return
         
         if len(selected_classes) != 2:
@@ -104,7 +107,10 @@ class ClassSelect(Select):
                 "クラスを2つ選択してください。", ephemeral=True
             )
             await asyncio.sleep(10)
-            await interaction.delete_original_response()
+            try:
+                await interaction.delete_original_response()
+            except:
+                pass
             return
         
         # ViewModelを使用してクラスを更新
@@ -117,13 +123,19 @@ class ClassSelect(Select):
                 f"Update selected classes: {', '.join(selected_classes)}", ephemeral=True
             )
             await asyncio.sleep(30)
-            await interaction.delete_original_response()
+            try:
+                await interaction.delete_original_response()
+            except:
+                pass
         else:
             await interaction.response.send_message(
                 "ユーザー未登録です。", ephemeral=True
             )
             await asyncio.sleep(15)
-            await interaction.delete_original_response()
+            try:
+                await interaction.delete_original_response()
+            except:
+                pass
 
 class ResultView(View):
     """試合結果入力用のView"""
@@ -140,7 +152,7 @@ class ResultView(View):
         self.active_result_views = active_result_views or {}
         
         # 結果の状態管理
-        self.player1_result = None
+        self.player1_result = None  # {"result": "win/loss", "class": "class_a/class_b"}
         self.player2_result = None
         self.results_locked = False
         self.timeout_task = None
@@ -151,59 +163,80 @@ class ResultView(View):
         
         self.logger = logging.getLogger(self.__class__.__name__)
     
-    @discord.ui.button(label="2勝", style=discord.ButtonStyle.success)
-    async def two_wins(self, button: Button, interaction: discord.Interaction):
-        await remove_role(interaction.user, "試合中")
-        await self.handle_result(interaction, 2)
+    @discord.ui.button(label="1番目のクラスで勝利", style=discord.ButtonStyle.success)
+    async def class_a_win(self, button: Button, interaction: discord.Interaction):
+        await self.show_confirmation(interaction, "win", "class_a")
     
-    @discord.ui.button(label="1勝", style=discord.ButtonStyle.primary)
-    async def one_win(self, button: Button, interaction: discord.Interaction):
-        await remove_role(interaction.user, "試合中")
-        await self.handle_result(interaction, 1)
+    @discord.ui.button(label="2番目のクラスで勝利", style=discord.ButtonStyle.success)
+    async def class_b_win(self, button: Button, interaction: discord.Interaction):
+        await self.show_confirmation(interaction, "win", "class_b")
     
-    @discord.ui.button(label="0勝", style=discord.ButtonStyle.danger)
-    async def zero_wins(self, button: Button, interaction: discord.Interaction):
-        await remove_role(interaction.user, "試合中")
-        await self.handle_result(interaction, 0)
+    @discord.ui.button(label="1番目のクラスで敗北", style=discord.ButtonStyle.danger)
+    async def class_a_loss(self, button: Button, interaction: discord.Interaction):
+        await self.show_confirmation(interaction, "loss", "class_a")
     
-    @discord.ui.button(label="リセット", style=discord.ButtonStyle.secondary)
-    async def reset(self, button: Button, interaction: discord.Interaction):
-        await self.handle_reset(interaction)
+    @discord.ui.button(label="2番目のクラスで敗北", style=discord.ButtonStyle.danger)
+    async def class_b_loss(self, button: Button, interaction: discord.Interaction):
+        await self.show_confirmation(interaction, "loss", "class_b")
     
-    async def handle_result(self, interaction: discord.Interaction, result: int):
-        """結果入力の処理"""
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-        
+    async def show_confirmation(self, interaction: discord.Interaction, result: str, selected_class: str):
+        """確認ダイアログを表示"""
         user_id = interaction.user.id
         
         # 参加者チェック
         if user_id != self.player1_id and user_id != self.player2_id:
-            await self._send_response(interaction, "あなたはこの試合の参加者ではありません。")
+            await interaction.response.send_message("あなたはこの試合の参加者ではありません。", ephemeral=True)
             return
         
         # ロック済みチェック
         if self.results_locked:
-            await self._send_response(interaction, "結果は既に確定しています。")
+            await interaction.response.send_message("結果は既に確定しています。", ephemeral=True)
             return
         
         # 既に入力済みチェック
         if user_id == self.player1_id and self.player1_result is not None:
-            await self._send_response(interaction, "あなたは既に結果を入力しています。")
+            await interaction.response.send_message("あなたは既に結果を入力しています。", ephemeral=True)
             return
         elif user_id == self.player2_id and self.player2_result is not None:
-            await self._send_response(interaction, "あなたは既に結果を入力しています。")
+            await interaction.response.send_message("あなたは既に結果を入力しています。", ephemeral=True)
             return
         
-        # 結果を設定
-        if user_id == self.player1_id:
-            self.player1_result = result
-        else:
-            self.player2_result = result
+        # クラス名を取得
+        user_classes = self.matching_classes[user_id]
+        class_name = user_classes[0] if selected_class == "class_a" else user_classes[1]
         
-        await self._send_response(
-            interaction, 
-            f"{interaction.user.display_name} が {result} 勝を選択しました。"
+        # 確認メッセージを作成
+        result_text = "勝利" if result == "win" else "敗北"
+        confirmation_message = f"**{class_name}** で **{result_text}** でよろしいですか？"
+        
+        # 確認用のViewを作成
+        confirmation_view = ResultConfirmationView(
+            self, interaction.user, result, selected_class, class_name
+        )
+        
+        await interaction.response.send_message(confirmation_message, view=confirmation_view, ephemeral=True)
+    
+    async def handle_result_confirmed(self, interaction: discord.Interaction, result: str, selected_class: str):
+        """確認後の結果処理"""
+        user_id = interaction.user.id
+        
+        # 結果を設定
+        result_data = {"result": result, "class": selected_class}
+        if user_id == self.player1_id:
+            self.player1_result = result_data
+        else:
+            self.player2_result = result_data
+        
+        # クラス名を表示用に変換
+        user_classes = self.matching_classes[user_id]
+        class_name = user_classes[0] if selected_class == "class_a" else user_classes[1]
+        
+        # 確認ダイアログを閉じる
+        await interaction.response.edit_message(content="結果を記録しました。", view=None)
+        
+        # スレッドに結果を通知
+        await self.thread.send(
+            f"{interaction.user.display_name} が {class_name} で {'勝利' if result == 'win' else '敗北'} を選択しました。"
         )
         
         # 両方の結果が揃ったかチェック
@@ -215,35 +248,6 @@ class ResultView(View):
             if self.timeout_task is None:
                 self.timeout_task = asyncio.create_task(self.timeout_wait())
     
-    async def handle_reset(self, interaction: discord.Interaction):
-        """リセット処理"""
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-        
-        user_id = interaction.user.id
-        
-        # 参加者チェック
-        if user_id != self.player1_id and user_id != self.player2_id:
-            await self._send_response(interaction, "この試合の参加者ではありません。")
-            return
-        
-        # 結果をリセット
-        if user_id == self.player1_id:
-            self.player1_result = None
-        elif user_id == self.player2_id:
-            self.player2_result = None
-        
-        # 試合中ロールを再付与
-        await assign_role(interaction.user, "試合中")
-        
-        # タイマーキャンセル
-        self.cancel_timeout()
-        
-        await self._send_response(
-            interaction, 
-            f"{interaction.user.display_name} さんの勝利数の入力をリセットしました。"
-        )
-    
     async def check_results(self):
         """結果をチェックして処理"""
         if self.results_locked:
@@ -252,6 +256,22 @@ class ResultView(View):
         try:
             self.logger.info(f"Player1 ID: {self.player1_id}, Result: {self.player1_result}")
             self.logger.info(f"Player2 ID: {self.player2_id}, Result: {self.player2_result}")
+            
+            # 結果の妥当性チェック
+            if (self.player1_result["result"] == "win" and self.player2_result["result"] == "loss") or \
+               (self.player1_result["result"] == "loss" and self.player2_result["result"] == "win"):
+                # 正常な結果（片方が勝ち、片方が負け）
+                pass
+            else:
+                # 結果が一致しない場合
+                self.player1_result = None
+                self.player2_result = None
+                await self.thread.send(
+                    f"<@{self.player1_id}>と<@{self.player2_id}>、結果が一致しません。"
+                    f"片方は勝利、もう片方は敗北を選択してください。再度入力してください。",
+                    view=self
+                )
+                return
             
             # ViewModelで結果を処理
             from models.user import UserModel
@@ -278,10 +298,22 @@ class ResultView(View):
             user1_name = get_attr(user1_data, 'user_name', 'Unknown')
             user2_name = get_attr(user2_data, 'user_name', 'Unknown')
             
-            result = self.result_vm.finalize_match(
+            # 勝者判定
+            user1_won = self.player1_result["result"] == "win"
+            user2_won = self.player2_result["result"] == "win"
+            
+            # 選択されたクラスを取得
+            user1_classes = self.matching_classes[self.player1_id]
+            user2_classes = self.matching_classes[self.player2_id]
+            
+            user1_selected_class = user1_classes[0] if self.player1_result["class"] == "class_a" else user1_classes[1]
+            user2_selected_class = user2_classes[0] if self.player2_result["class"] == "class_a" else user2_classes[1]
+            
+            result = self.result_vm.finalize_match_with_classes(
                 user1_id, user2_id, 
-                self.player1_result, self.player2_result,
-                user1_rating, user2_rating
+                user1_won, user2_won,
+                user1_rating, user2_rating,
+                user1_selected_class, user2_selected_class
             )
             
             if result['success']:
@@ -296,12 +328,14 @@ class ResultView(View):
                 user1_change_sign = "+" if user1_change > 0 else ""
                 user2_change_sign = "+" if user2_change > 0 else ""
                 
+                # 使用クラス情報を含むメッセージ
                 message = (
-                    f"{user1_name}さんのレーティングが更新されました。\n"
-                    f"変動前: {user1_rating:.0f} -> 変動後: {result['after_user1_rating']:.0f} "
-                    f"({user1_change_sign}{user1_change:.0f})\n"
-                    f"{user2_name}さんのレーティングが更新されました。\n"
-                    f"変動前: {user2_rating:.0f} -> 変動後: {result['after_user2_rating']:.0f} "
+                    f"試合結果が確定しました！\n\n"
+                    f"**{user1_name}** ({user1_selected_class}) {'🏆 勝利' if user1_won else '💀 敗北'}\n"
+                    f"レート: {user1_rating:.0f} → {result['after_user1_rating']:.0f} "
+                    f"({user1_change_sign}{user1_change:.0f})\n\n"
+                    f"**{user2_name}** ({user2_selected_class}) {'🏆 勝利' if user2_won else '💀 敗北'}\n"
+                    f"レート: {user2_rating:.0f} → {result['after_user2_rating']:.0f} "
                     f"({user2_change_sign}{user2_change:.0f})"
                 )
                 
@@ -320,15 +354,8 @@ class ResultView(View):
                 
                 # スレッドを削除
                 await self.thread.delete()
-                
             else:
-                # 結果が一致しない場合
-                self.player1_result = None
-                self.player2_result = None
-                await self.thread.send(
-                    f"<@{self.player1_id}>と<@{self.player2_id}>、結果が一致しません。再度入力してください。",
-                    view=self
-                )
+                await self.thread.send(f"エラー: {result['message']}")
         
         except Exception as e:
             self.logger.error(f"Error in check_results: {e}")
@@ -351,10 +378,9 @@ class ResultView(View):
             
             if self.player1_result is None and self.player2_result is not None:
                 # プレイヤー1が未入力、プレイヤー2の勝利
-                self.player1_result = 0
-                self.player2_result = 2
+                self.player1_result = {"result": "loss", "class": "class_a"}  # デフォルトでclass_a
                 await self.thread.send(
-                    f"<@{self.player1_id}> が勝利数を報告しなかったため、"
+                    f"<@{self.player1_id}> が結果を報告しなかったため、"
                     f"<@{self.player2_id}> の勝利となります。\n"
                     f"このスレッドは{THREAD_DELETE_DELAY//3600}時間後に削除されます。"
                 )
@@ -370,10 +396,9 @@ class ResultView(View):
                 
             elif self.player2_result is None and self.player1_result is not None:
                 # プレイヤー2が未入力、プレイヤー1の勝利
-                self.player1_result = 2
-                self.player2_result = 0
+                self.player2_result = {"result": "loss", "class": "class_a"}  # デフォルトでclass_a
                 await self.thread.send(
-                    f"<@{self.player2_id}> が勝利数を報告しなかったため、"
+                    f"<@{self.player2_id}> が結果を報告しなかったため、"
                     f"<@{self.player1_id}> の勝利となります。\n"
                     f"このスレッドは{THREAD_DELETE_DELAY//3600}時間後に削除されます。"
                 )
@@ -386,6 +411,28 @@ class ResultView(View):
                 self.cancel_vm.apply_timeout_penalty(self.player2_id)
                 
                 await self.check_results_by_timeout()
+                
+            elif self.player1_result is None and self.player2_result is None:
+                # 両方未入力の場合
+                await self.thread.send(
+                    f"<@{self.player1_id}> と <@{self.player2_id}> の両方が結果を報告しませんでした。\n"
+                    f"このスレッドは削除されます。"
+                )
+                
+                player1_member = guild.get_member(self.player1_id)
+                player2_member = guild.get_member(self.player2_id)
+                
+                if player1_member:
+                    await remove_role(player1_member, "試合中")
+                if player2_member:
+                    await remove_role(player2_member, "試合中")
+                
+                # active_result_viewsから削除
+                if self.active_result_views and self.thread.id in self.active_result_views:
+                    del self.active_result_views[self.thread.id]
+                
+                await asyncio.sleep(5)
+                await self.thread.delete()
         
         except asyncio.CancelledError:
             player1_member = guild.get_member(self.player1_id)
@@ -423,13 +470,6 @@ class ResultView(View):
         if self.timeout_task is not None:
             self.timeout_task.cancel()
             self.timeout_task = None
-    
-    async def _send_response(self, interaction: discord.Interaction, content: str):
-        """レスポンスを送信"""
-        if not interaction.response.is_done():
-            await interaction.response.send_message(content)
-        else:
-            await interaction.followup.send(content)
     
     def _update_season_flag(self, session, user1_id: int, user2_id: int):
         """シーズンマッチングフラグを更新"""
@@ -474,6 +514,49 @@ class ResultView(View):
                     )
         except Exception as e:
             self.logger.error(f"Failed to collect messages: {e}")
+
+class ResultConfirmationView(View):
+    """結果確認用のView"""
+    
+    def __init__(self, result_view, user, result: str, selected_class: str, class_name: str):
+        super().__init__(timeout=60)
+        self.result_view = result_view
+        self.user = user
+        self.result = result
+        self.selected_class = selected_class
+        self.class_name = class_name
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    @discord.ui.button(label="はい", style=discord.ButtonStyle.success)
+    async def confirm(self, button: Button, interaction: discord.Interaction):
+        """確認ボタンのコールバック"""
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("このボタンはあなたのためのものではありません。", ephemeral=True)
+            return
+        
+        # 試合中ロールを削除
+        await remove_role(interaction.user, "試合中")
+        
+        # 結果を処理
+        await self.result_view.handle_result_confirmed(interaction, self.result, self.selected_class)
+    
+    @discord.ui.button(label="いいえ", style=discord.ButtonStyle.danger)
+    async def cancel(self, button: Button, interaction: discord.Interaction):
+        """キャンセルボタンのコールバック"""
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("このボタンはあなたのためのものではありません。", ephemeral=True)
+            return
+        
+        await interaction.response.edit_message(content="キャンセルしました。", view=None)
+    
+    async def on_timeout(self):
+        """タイムアウト時の処理"""
+        try:
+            # ビューを無効化
+            for item in self.children:
+                item.disabled = True
+        except Exception as e:
+            self.logger.error(f"Error in confirmation timeout: {e}")
 
 class RateDisplayView(View):
     """レート表示用のView"""

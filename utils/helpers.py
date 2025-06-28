@@ -39,6 +39,35 @@ async def safe_create_thread(channel: discord.TextChannel, user1: discord.Member
                     raise
     return None
 
+async def safe_create_register_thread(channel: discord.TextChannel, user: discord.Member) -> Optional[discord.Thread]:
+    """安全にスレッドを作成（登録用）"""
+    retries = 5
+    for attempt in range(retries):
+        try:
+            async with api_call_semaphore:
+                register_thread = await channel.create_thread(
+                    name=f"{user.display_name}_registration",
+                    type=discord.ChannelType.private_thread,
+                    invitable=False
+                )
+            return register_thread
+        except discord.HTTPException as e:
+            if e.status == 429:
+                retry_after = getattr(e, 'retry_after', None)
+                if retry_after is None:
+                    retry_after = 5
+                else:
+                    retry_after += 1
+                logger.warning(f"Rate limited while creating registration thread. Retrying after {retry_after} seconds.")
+                await asyncio.sleep(retry_after)
+            else:
+                logger.error(f"Registration thread creation failed: {e}")
+                if attempt < retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                else:
+                    raise
+    return None
+
 async def safe_add_user_to_thread(thread: discord.Thread, user: discord.Member) -> bool:
     """安全にユーザーをスレッドに追加"""
     retries = 5

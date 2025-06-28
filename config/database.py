@@ -15,7 +15,6 @@ Base.prepare(engine, reflect=True,
   reflection_options={'only': [
     'beyond_user','beyond_deck_class','beyond_match_history',
     'beyond_season','beyond_user_season_record',
-    'season','user_season_record','match_history','deck_class'
   ]})
 
 # セッション作成
@@ -41,12 +40,6 @@ try:
     MatchHistory = Base.classes.beyond_match_history
     Season = Base.classes.beyond_season
     UserSeasonRecord = Base.classes.beyond_user_season_record
-    
-    # 旧システム系テーブル
-    OldSeason = Base.classes.season
-    OldUserSeasonRecord = Base.classes.user_season_record
-    OldMatchHistory = Base.classes.match_history
-    OldDeckClass = Base.classes.deck_class
     
     logging.info("Database models mapped successfully")
     

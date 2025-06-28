@@ -3,7 +3,7 @@ from discord.ui import View, Button, Select
 import asyncio
 from typing import Optional
 from collections import defaultdict
-from utils.helpers import safe_create_thread, safe_add_user_to_thread, count_characters
+from utils.helpers import safe_create_register_thread, safe_add_user_to_thread, count_characters
 import logging
 
 class RegisterView(View):
@@ -23,10 +23,9 @@ class RegisterButton(Button):
     async def callback(self, interaction: discord.Interaction):
         """登録ボタンのコールバック"""
         # スレッドを作成
-        thread = await safe_create_thread(
+        thread = await safe_create_register_thread(
             interaction.channel, 
             interaction.user, 
-            interaction.user  # 同じユーザーを渡す
         )
         
         if thread:
@@ -53,10 +52,10 @@ class RegisterButton(Button):
             
             # 既存ユーザーをチェック
             existing_user = user_model.get_user_by_discord_id(str(user_id))
-            if existing_user and existing_user.discord_id and existing_user.trust_points:
+            if existing_user and existing_user['discord_id'] and existing_user['trust_points']:
                 await thread.send("あなたはすでに登録されています。")
                 await asyncio.sleep(8)
-                await thread.delete()
+                await self._safe_delete_thread(thread)
                 return
             
             # ユーザーにゲーム内の名前の入力を求める
@@ -82,7 +81,7 @@ class RegisterButton(Button):
                     break
                 except asyncio.TimeoutError:
                     await thread.send("タイムアウトしました。もう一度お試しください。")
-                    await thread.delete()
+                    await self._safe_delete_thread(thread)
                     return
             
             # SHADOWVERSE_IDの入力を求める
@@ -99,7 +98,7 @@ class RegisterButton(Button):
                     shadowverse_id = input_id
                 except asyncio.TimeoutError:
                     await thread.send("登録がタイムアウトしました。もう一度お試しください。")
-                    await thread.delete()
+                    await self._safe_delete_thread(thread)
                     return
             
             # ユーザーを作成
@@ -119,7 +118,44 @@ class RegisterButton(Button):
             self.logger.error(f"Unexpected error during registration for user {user_id}: {e}")
         finally:
             await asyncio.sleep(6)
+            await self._safe_delete_thread(thread)
+    
+    async def _safe_delete_thread(self, thread: discord.Thread):
+        """スレッドを安全に削除"""
+        try:
+            # スレッドが存在するかチェック（guild.get_threadを使用）
+            guild_thread = thread.guild.get_thread(thread.id)
+            if guild_thread is None:
+                # スレッドが見つからない場合はguild.fetch_channelで確認
+                try:
+                    await thread.guild.fetch_channel(thread.id)
+                except discord.errors.NotFound:
+                    # スレッドが既に削除されている
+                    self.logger.info(f"Thread {thread.id} was already deleted")
+                    return
+            
+            # スレッドが存在する場合は削除
             await thread.delete()
+            self.logger.info(f"Thread {thread.id} deleted successfully")
+            
+        except discord.errors.NotFound:
+            # スレッドが既に削除されている
+            self.logger.info(f"Thread {thread.id} was already deleted")
+        except discord.errors.Forbidden:
+            # 削除権限がない
+            self.logger.error(f"No permission to delete thread {thread.id}")
+        except AttributeError as e:
+            # オブジェクトの属性エラー
+            self.logger.error(f"Attribute error when deleting thread {thread.id}: {e}")
+            # 単純に削除を試行
+            try:
+                await thread.delete()
+                self.logger.info(f"Thread {thread.id} deleted successfully (fallback)")
+            except Exception as fallback_e:
+                self.logger.error(f"Fallback deletion failed for thread {thread.id}: {fallback_e}")
+        except Exception as e:
+            # その他のエラー
+            self.logger.error(f"Error deleting thread {thread.id}: {e}")
 
 class ProfileView(View):
     """プロフィール表示View"""
@@ -216,10 +252,10 @@ class StayButtonView(View):
         is_in_match = ongoing_match_role in interaction.user.roles
         
         # ボタンのラベルや有効・無効を分岐
-        if self.user_instance.stay_flag == 0 and self.user_instance.stayed_rating == 1500:
+        if self.user_instance['stay_flag'] == 0 and self.user_instance['stayed_rating'] == 1500:
             label = "stay機能を使用する"
             disabled = is_in_match
-        elif self.user_instance.stay_flag == 1:
+        elif self.user_instance['stay_flag'] == 1:
             label = "stayを元に戻す"
             disabled = is_in_match
         else:
@@ -263,14 +299,14 @@ class StayButton(Button):
                 return
             
             # stay_flag の状態に応じて処理を分岐
-            if user_instance.stay_flag == 0 and user_instance.stayed_rating == 1500:
+            if user_instance['stay_flag'] == 0 and user_instance['stayed_rating'] == 1500:
                 confirm_view = StayConfirmView(user_instance, mode="stay")
                 await interaction.response.send_message(
                     "stay機能を使用すると、現在のレートと勝敗数が保存され、レートが1500,勝敗数が0にリセットされます。\n本当に実行しますか？",
                     view=confirm_view,
                     ephemeral=True
                 )
-            elif user_instance.stay_flag == 1:
+            elif user_instance['stay_flag'] == 1:
                 confirm_view = StayConfirmView(user_instance, mode="revert")
                 await interaction.response.send_message(
                     "stayを元に戻すと、stayedに保存されているレートと勝敗数をメインアカウントに復元します。現在のレート，試合数などは削除されます。\n本当に実行しますか？",
@@ -302,7 +338,7 @@ class StayConfirmView(View):
     async def confirm(self, button: Button, interaction: discord.Interaction):
         """確認ボタンのコールバック"""
         # 実行者確認
-        if interaction.user.id != int(self.user_instance.discord_id):
+        if interaction.user.id != int(self.user_instance['discord_id']):
             await interaction.response.send_message(
                 "このボタンはあなたのためのものではありません。", 
                 ephemeral=True
@@ -324,14 +360,14 @@ class StayConfirmView(View):
             user_model = UserModel()
             
             # ViewModelでStay機能を実行
-            result = user_model.toggle_stay_flag(self.user_instance.discord_id)
+            result = user_model.toggle_stay_flag(self.user_instance['discord_id'])
             
             if result:
                 await interaction.response.edit_message(
                     content=result['message'], 
                     view=None
                 )
-                self.logger.info(f"Stay function executed for user {self.user_instance.discord_id}: {result['action']}")
+                self.logger.info(f"Stay function executed for user {self.user_instance['discord_id']}: {result['action']}")
             else:
                 await interaction.response.edit_message(
                     content="Stay機能の実行に失敗しました。", 
@@ -344,7 +380,7 @@ class StayConfirmView(View):
                 view=None
             )
         except Exception as e:
-            self.logger.error(f"Error in stay function for user {self.user_instance.discord_id}: {e}")
+            self.logger.error(f"Error in stay function for user {self.user_instance['discord_id']}: {e}")
             await interaction.response.edit_message(
                 content="予期しないエラーが発生しました。", 
                 view=None
@@ -354,7 +390,7 @@ class StayConfirmView(View):
     async def cancel(self, button: Button, interaction: discord.Interaction):
         """キャンセルボタンのコールバック"""
         # ボタンを押したユーザーがコマンド実行者か確認
-        if interaction.user.id != int(self.user_instance.discord_id):
+        if interaction.user.id != int(self.user_instance['discord_id']):
             await interaction.response.send_message(
                 "このボタンはあなたのためのものではありません。", 
                 ephemeral=True
@@ -435,10 +471,10 @@ class AchievementButton(Button):
             
             # 各シーズンごとに処理
             for season in seasons:
-                season_id = season.id
+                season_id = season['id']
                 
                 # そのシーズンのユーザーの記録を取得
-                user_season_record = season_model.get_user_season_record(db_user.id, season_id)
+                user_season_record = season_model.get_user_season_record(db_user['id'], season_id)
                 
                 if not user_season_record:
                     continue

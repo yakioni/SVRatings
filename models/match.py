@@ -14,6 +14,35 @@ class MatchModel(BaseModel):
         self.MatchHistory = MatchHistory
         self.User = User
     
+    def _match_to_dict(self, match) -> Dict[str, Any]:
+        """MatchHistoryオブジェクトを辞書に変換"""
+        if not match:
+            return None
+        
+        return {
+            'id': match.id,
+            'user1_id': match.user1_id,
+            'user2_id': match.user2_id,
+            'match_date': match.match_date,
+            'season_name': match.season_name,
+            'user1_class_a': match.user1_class_a,
+            'user1_class_b': match.user1_class_b,
+            'user2_class_a': match.user2_class_a,
+            'user2_class_b': match.user2_class_b,
+            'user1_rating_change': match.user1_rating_change,
+            'user2_rating_change': match.user2_rating_change,
+            'winner_user_id': match.winner_user_id,
+            'loser_user_id': match.loser_user_id,
+            'before_user1_rating': match.before_user1_rating,
+            'before_user2_rating': match.before_user2_rating,
+            'after_user1_rating': match.after_user1_rating,
+            'after_user2_rating': match.after_user2_rating,
+            'user1_stay_flag': match.user1_stay_flag,
+            'user2_stay_flag': match.user2_stay_flag,
+            'user1_selected_class': getattr(match, 'user1_selected_class', None),
+            'user2_selected_class': getattr(match, 'user2_selected_class', None)
+        }
+    
     def create_match_placeholder(self, user1_id: int, user2_id: int, season_name: str,
                                 user1_class_a: str, user1_class_b: str,
                                 user2_class_a: str, user2_class_b: str,
@@ -46,7 +75,10 @@ class MatchModel(BaseModel):
                 after_user1_rating=None,
                 after_user2_rating=None,
                 user1_stay_flag=user1.stay_flag,
-                user2_stay_flag=user2.stay_flag
+                user2_stay_flag=user2.stay_flag,
+                # 新しいカラム（初期値はNone）
+                user1_selected_class=None,
+                user2_selected_class=None
             )
             
             session.add(new_match)
@@ -54,11 +86,58 @@ class MatchModel(BaseModel):
         
         return self.execute_with_session(_create_placeholder)
     
+    def finalize_match_result_with_classes(self, user1_id: int, user2_id: int, 
+                                          user1_won: bool, user2_won: bool,
+                                          before_user1_rating: float, before_user2_rating: float,
+                                          after_user1_rating: float, after_user2_rating: float,
+                                          user1_selected_class: str, user2_selected_class: str) -> Optional[MatchHistory]:
+        """試合結果を確定（クラス情報付き）"""
+        def _finalize_match(session: Session):
+            # プレースホルダー試合を検索
+            match = session.query(self.MatchHistory).filter(
+                self.MatchHistory.user1_id == user1_id,
+                self.MatchHistory.user2_id == user2_id,
+                self.MatchHistory.before_user1_rating == before_user1_rating,
+                self.MatchHistory.before_user2_rating == before_user2_rating,
+                self.MatchHistory.after_user1_rating.is_(None)
+            ).order_by(desc(self.MatchHistory.id)).first()
+            
+            # レーティング変動を計算
+            user1_rating_change = after_user1_rating - before_user1_rating
+            user2_rating_change = after_user2_rating - before_user2_rating
+            
+            # 勝者・敗者を決定
+            if user1_won:
+                winner_user_id, loser_user_id = user1_id, user2_id
+            else:
+                winner_user_id, loser_user_id = user2_id, user1_id
+            
+            if match:
+                # 既存のプレースホルダーを更新
+                match.user1_rating_change = user1_rating_change
+                match.user2_rating_change = user2_rating_change
+                match.after_user1_rating = after_user1_rating
+                match.after_user2_rating = after_user2_rating
+                match.winner_user_id = winner_user_id
+                match.loser_user_id = loser_user_id
+                match.user1_selected_class = user1_selected_class
+                match.user2_selected_class = user2_selected_class
+                return match
+            else:
+                # プレースホルダーが見つからない場合は新規作成
+                return self._create_new_match_record_with_classes(
+                    session, user1_id, user2_id, user1_rating_change, user2_rating_change,
+                    winner_user_id, loser_user_id, before_user1_rating, before_user2_rating,
+                    after_user1_rating, after_user2_rating, user1_selected_class, user2_selected_class
+                )
+        
+        return self.execute_with_session(_finalize_match)
+    
     def finalize_match_result(self, user1_id: int, user2_id: int, 
                              user1_wins: int, user2_wins: int,
                              before_user1_rating: float, before_user2_rating: float,
                              after_user1_rating: float, after_user2_rating: float) -> Optional[MatchHistory]:
-        """試合結果を確定"""
+        """試合結果を確定（旧式、後方互換性のため残す）"""
         def _finalize_match(session: Session):
             # プレースホルダー試合を検索
             match = session.query(self.MatchHistory).filter(
@@ -98,6 +177,44 @@ class MatchModel(BaseModel):
         
         return self.execute_with_session(_finalize_match)
     
+    def _create_new_match_record_with_classes(self, session: Session, user1_id: int, user2_id: int,
+                                             user1_rating_change: float, user2_rating_change: float,
+                                             winner_user_id: int, loser_user_id: int,
+                                             before_user1_rating: float, before_user2_rating: float,
+                                             after_user1_rating: float, after_user2_rating: float,
+                                             user1_selected_class: str, user2_selected_class: str) -> MatchHistory:
+        """新しい試合記録を作成（クラス情報付き）"""
+        user1 = session.query(self.User).filter_by(id=user1_id).first()
+        user2 = session.query(self.User).filter_by(id=user2_id).first()
+        
+        match_date = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
+        
+        new_match = self.MatchHistory(
+            user1_id=user1_id,
+            user2_id=user2_id,
+            match_date=match_date,
+            season_name="Unknown",  # 通常はプレースホルダーから取得
+            user1_class_a=user1.class1 if user1 else None,
+            user1_class_b=user1.class2 if user1 else None,
+            user2_class_a=user2.class1 if user2 else None,
+            user2_class_b=user2.class2 if user2 else None,
+            user1_rating_change=user1_rating_change,
+            user2_rating_change=user2_rating_change,
+            winner_user_id=winner_user_id,
+            loser_user_id=loser_user_id,
+            before_user1_rating=before_user1_rating,
+            before_user2_rating=before_user2_rating,
+            after_user1_rating=after_user1_rating,
+            after_user2_rating=after_user2_rating,
+            user1_stay_flag=user1.stay_flag if user1 else 0,
+            user2_stay_flag=user2.stay_flag if user2 else 0,
+            user1_selected_class=user1_selected_class,
+            user2_selected_class=user2_selected_class
+        )
+        
+        session.add(new_match)
+        return new_match
+    
     def _create_new_match_record(self, session: Session, user1_id: int, user2_id: int,
                                 user1_rating_change: float, user2_rating_change: float,
                                 winner_user_id: int, loser_user_id: int,
@@ -133,33 +250,39 @@ class MatchModel(BaseModel):
         session.add(new_match)
         return new_match
     
-    def get_user_match_history(self, user_id: int, limit: int = 50) -> List[MatchHistory]:
-        """ユーザーの試合履歴を取得"""
+    def get_user_match_history(self, user_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        """ユーザーの試合履歴を取得（辞書形式で返す）"""
         def _get_history(session: Session):
-            return session.query(self.MatchHistory).filter(
+            matches = session.query(self.MatchHistory).filter(
                 or_(
                     self.MatchHistory.user1_id == user_id,
                     self.MatchHistory.user2_id == user_id
                 )
             ).order_by(desc(self.MatchHistory.match_date)).limit(limit).all()
+            
+            # セッション内で辞書に変換
+            return [self._match_to_dict(match) for match in matches]
         
         return self.safe_execute(_get_history) or []
     
-    def get_user_vs_user_history(self, user1_id: int, user2_id: int) -> List[MatchHistory]:
-        """特定のユーザー間の対戦履歴を取得"""
+    def get_user_vs_user_history(self, user1_id: int, user2_id: int) -> List[Dict[str, Any]]:
+        """特定のユーザー間の対戦履歴を取得（辞書形式で返す）"""
         def _get_vs_history(session: Session):
-            return session.query(self.MatchHistory).filter(
+            matches = session.query(self.MatchHistory).filter(
                 or_(
                     and_(self.MatchHistory.user1_id == user1_id, self.MatchHistory.user2_id == user2_id),
                     and_(self.MatchHistory.user1_id == user2_id, self.MatchHistory.user2_id == user1_id)
                 )
             ).order_by(desc(self.MatchHistory.match_date)).all()
+            
+            # セッション内で辞書に変換
+            return [self._match_to_dict(match) for match in matches]
         
         return self.safe_execute(_get_vs_history) or []
     
     def get_user_season_matches(self, user_id: int, season_name: str, 
-                               user_stay_flag: int = None) -> List[MatchHistory]:
-        """ユーザーの特定シーズンの試合履歴を取得"""
+                               user_stay_flag: int = None) -> List[Dict[str, Any]]:
+        """ユーザーの特定シーズンの試合履歴を取得（辞書形式で返す）"""
         def _get_season_matches(session: Session):
             query = session.query(self.MatchHistory).filter(
                 or_(
@@ -180,13 +303,39 @@ class MatchModel(BaseModel):
                     )
                 )
             
-            return query.order_by(desc(self.MatchHistory.match_date)).all()
+            matches = query.order_by(desc(self.MatchHistory.match_date)).all()
+            
+            # セッション内で辞書に変換
+            return [self._match_to_dict(match) for match in matches]
         
         return self.safe_execute(_get_season_matches) or []
     
-    def get_user_class_matches(self, user_id: int, classes: List[str], 
-                              season_name: str = None) -> List[MatchHistory]:
-        """ユーザーの特定クラスでの試合履歴を取得"""
+    def get_user_class_matches(self, user_id: int, class_name: str, 
+                              season_name: str = None) -> List[Dict[str, Any]]:
+        """ユーザーの特定クラスでの試合履歴を取得（selected_classベース、辞書形式で返す）"""
+        def _get_class_matches(session: Session):
+            query = session.query(self.MatchHistory).filter(
+                or_(
+                    and_(self.MatchHistory.user1_id == user_id,
+                         self.MatchHistory.user1_selected_class == class_name),
+                    and_(self.MatchHistory.user2_id == user_id,
+                         self.MatchHistory.user2_selected_class == class_name)
+                )
+            )
+            
+            if season_name:
+                query = query.filter(self.MatchHistory.season_name == season_name)
+            
+            matches = query.order_by(desc(self.MatchHistory.match_date)).all()
+            
+            # セッション内で辞書に変換
+            return [self._match_to_dict(match) for match in matches]
+        
+        return self.safe_execute(_get_class_matches) or []
+    
+    def get_user_class_matches_legacy(self, user_id: int, classes: List[str], 
+                              season_name: str = None) -> List[Dict[str, Any]]:
+        """ユーザーの特定クラスでの試合履歴を取得（旧版、後方互換性のため、辞書形式で返す）"""
         def _get_class_matches(session: Session):
             if len(classes) == 1:
                 # 単一クラス
@@ -228,7 +377,10 @@ class MatchModel(BaseModel):
             if season_name:
                 query = query.filter(self.MatchHistory.season_name == season_name)
             
-            return query.order_by(desc(self.MatchHistory.match_date)).all()
+            matches = query.order_by(desc(self.MatchHistory.match_date)).all()
+            
+            # セッション内で辞書に変換
+            return [self._match_to_dict(match) for match in matches]
         
         return self.safe_execute(_get_class_matches) or []
     
@@ -251,10 +403,30 @@ class MatchModel(BaseModel):
         
         return rating_change
     
-    def get_match_by_id(self, match_id: int) -> Optional[MatchHistory]:
-        """IDで試合履歴を取得"""
+    def calculate_rating_change_from_result(self, player_rating: float, opponent_rating: float, 
+                                           player_won: bool) -> float:
+        """勝敗結果からレーティング変動を計算"""
+        rating_diff = player_rating - opponent_rating
+        increment_per_win = RATING_DIFF_MULTIPLIER * abs(rating_diff)
+        
+        if player_rating > opponent_rating:
+            if player_won:
+                rating_change = BASE_RATING_CHANGE - increment_per_win
+            else:
+                rating_change = -(BASE_RATING_CHANGE + increment_per_win)
+        else:
+            if player_won:
+                rating_change = BASE_RATING_CHANGE + increment_per_win
+            else:
+                rating_change = -(BASE_RATING_CHANGE - increment_per_win)
+        
+        return rating_change
+    
+    def get_match_by_id(self, match_id: int) -> Optional[Dict[str, Any]]:
+        """IDで試合履歴を取得（辞書形式で返す）"""
         def _get_match(session: Session):
-            return session.query(self.MatchHistory).filter_by(id=match_id).first()
+            match = session.query(self.MatchHistory).filter_by(id=match_id).first()
+            return self._match_to_dict(match) if match else None
         
         return self.safe_execute(_get_match)
     
@@ -298,11 +470,14 @@ class MatchModel(BaseModel):
         
         return self.execute_with_session(_reverse_match)
     
-    def get_recent_matches(self, limit: int = 100) -> List[MatchHistory]:
-        """最近の試合履歴を取得"""
+    def get_recent_matches(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """最近の試合履歴を取得（辞書形式で返す）"""
         def _get_recent(session: Session):
-            return session.query(self.MatchHistory).filter(
+            matches = session.query(self.MatchHistory).filter(
                 self.MatchHistory.winner_user_id.isnot(None)
             ).order_by(desc(self.MatchHistory.match_date)).limit(limit).all()
+            
+            # セッション内で辞書に変換
+            return [self._match_to_dict(match) for match in matches]
         
         return self.safe_execute(_get_recent) or []

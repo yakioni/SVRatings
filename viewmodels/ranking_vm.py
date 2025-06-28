@@ -102,10 +102,13 @@ class RankingViewModel:
                     'is_stayed': stay_flag == 1 and stayed_rating_value == effective_rating_value
                 })
             
+            self.logger.info(f"Rating ranking returned {len(result)} records")
             return result
             
         except Exception as e:
             self.logger.error(f"Error getting rating ranking: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return []
     
     def get_win_streak_ranking(self, limit: int = 100) -> List[Dict[str, Any]]:
@@ -129,10 +132,13 @@ class RankingViewModel:
                     'current_win_streak': user.win_streak
                 })
             
+            self.logger.info(f"Win streak ranking returned {len(result)} records")
             return result
             
         except Exception as e:
             self.logger.error(f"Error getting win streak ranking: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return []
     
     def get_win_rate_ranking(self, min_matches: int = 50, limit: int = 16) -> List[Dict[str, Any]]:
@@ -143,6 +149,8 @@ class RankingViewModel:
             
             users = session.query(User).filter(User.latest_season_matched == True).all()
             session.close()
+            
+            self.logger.info(f"Found {len(users)} users with latest_season_matched=True")
             
             ranking_with_win_rate = []
             
@@ -165,7 +173,7 @@ class RankingViewModel:
                 effective_loss = current_loss
                 effective_win_rate = current_win_rate
                 
-                # stay_flag == 0 → current のみ使用
+                # stay_flag == 1 の場合の処理
                 if user.stay_flag == 1:
                     if user.rating < user.stayed_rating:
                         # stayed側がcurrentより大きい場合 → stayedを優先
@@ -186,6 +194,8 @@ class RankingViewModel:
                         'used_stayed': used_stayed
                     })
             
+            self.logger.info(f"Found {len(ranking_with_win_rate)} users with >= {min_matches} matches")
+            
             # 勝率の降順で並べて上位を取得
             ranking_with_win_rate.sort(key=lambda x: x['win_rate'], reverse=True)
             
@@ -201,50 +211,69 @@ class RankingViewModel:
                     'used_stayed': data['used_stayed']
                 })
             
+            self.logger.info(f"Win rate ranking returned {len(result)} records")
             return result
             
         except Exception as e:
             self.logger.error(f"Error getting win rate ranking: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return []
     
     def get_past_season_rating_ranking(self, season_id: int, limit: int = 100) -> List[Dict[str, Any]]:
         """過去シーズンのレーティングランキングを取得"""
         try:
-            season_records = self.season_model.get_season_rankings(season_id, limit)
+            from config.database import get_session, UserSeasonRecord
+            session = get_session()
+            
+            # UserSeasonRecordから直接取得
+            records = session.query(UserSeasonRecord).filter(
+                UserSeasonRecord.season_id == season_id
+            ).order_by(desc(UserSeasonRecord.rating)).limit(limit).all()
+            
+            session.close()
+            
+            self.logger.info(f"Found {len(records)} season records for season {season_id}")
             
             result = []
-            for i, record in enumerate(season_records, 1):
+            for i, record in enumerate(records, 1):
                 user = self.user_model.get_user_by_id(record.user_id)
                 if user:
                     result.append({
                         'rank': i,
-                        'user_name': user.user_name,
+                        'user_name': user['user_name'],
                         'rating': int(record.rating),
                         'win_count': record.win_count,
                         'loss_count': record.loss_count,
                         'total_matches': record.total_matches
                     })
             
+            self.logger.info(f"Past season rating ranking returned {len(result)} records")
             return result
             
         except Exception as e:
             self.logger.error(f"Error getting past season rating ranking: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return []
     
     def get_past_season_win_rate_ranking(self, season_id: int, min_matches: int = 50, limit: int = 16) -> List[Dict[str, Any]]:
         """過去シーズンの勝率ランキングを取得"""
         try:
-            from config.database import get_session
+            from config.database import get_session, UserSeasonRecord
             session = get_session()
             
-            records = session.query(self.season_model.UserSeasonRecord).filter(
+            # UserSeasonRecordから直接取得
+            records = session.query(UserSeasonRecord).filter(
                 and_(
-                    self.season_model.UserSeasonRecord.season_id == season_id,
-                    self.season_model.UserSeasonRecord.total_matches >= min_matches
+                    UserSeasonRecord.season_id == season_id,
+                    UserSeasonRecord.total_matches >= min_matches
                 )
             ).all()
             
             session.close()
+            
+            self.logger.info(f"Found {len(records)} season records with >= {min_matches} matches for season {season_id}")
             
             # 勝率で並び替え
             ranking = sorted(
@@ -260,30 +289,36 @@ class RankingViewModel:
                     win_rate = (record.win_count / record.total_matches) * 100 if record.total_matches > 0 else 0
                     result.append({
                         'rank': i,
-                        'user_name': user.user_name,
+                        'user_name': user['user_name'],
                         'win_rate': win_rate,
                         'win_count': record.win_count,
                         'loss_count': record.loss_count,
                         'total_matches': record.total_matches
                     })
             
+            self.logger.info(f"Past season win rate ranking returned {len(result)} records")
             return result
             
         except Exception as e:
             self.logger.error(f"Error getting past season win rate ranking: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return []
     
     def get_past_season_win_streak_ranking(self, season_id: int, limit: int = 100) -> List[Dict[str, Any]]:
         """過去シーズンの連勝数ランキングを取得"""
         try:
-            from config.database import get_session
+            from config.database import get_session, UserSeasonRecord
             session = get_session()
             
-            records = session.query(self.season_model.UserSeasonRecord).filter_by(
-                season_id=season_id
-            ).order_by(desc(self.season_model.UserSeasonRecord.max_win_streak)).limit(limit).all()
+            # UserSeasonRecordから直接取得
+            records = session.query(UserSeasonRecord).filter(
+                UserSeasonRecord.season_id == season_id
+            ).order_by(desc(UserSeasonRecord.max_win_streak)).limit(limit).all()
             
             session.close()
+            
+            self.logger.info(f"Found {len(records)} season records for season {season_id}")
             
             result = []
             for i, record in enumerate(records, 1):
@@ -291,14 +326,17 @@ class RankingViewModel:
                 if user:
                     result.append({
                         'rank': i,
-                        'user_name': user.user_name,
+                        'user_name': user['user_name'],
                         'max_win_streak': record.max_win_streak
                     })
             
+            self.logger.info(f"Past season win streak ranking returned {len(result)} records")
             return result
             
         except Exception as e:
             self.logger.error(f"Error getting past season win streak ranking: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return []
     
     def clear_cache(self):
@@ -310,26 +348,26 @@ class RankingViewModel:
         """特定ユーザーのランキング情報を取得"""
         try:
             user = self.user_model.get_user_by_discord_id(discord_id)
-            if not user or not user.latest_season_matched:
+            if not user or not user['latest_season_matched']:
                 return None
             
             # 現在の順位を取得
             rank = self.user_model.get_user_rank(discord_id)
             
             # 効果的レートを計算
-            effective_rating = max(user.rating, user.stayed_rating or 0)
+            effective_rating = max(user['rating'], user['stayed_rating'] or 0)
             
             return {
-                'user_name': user.user_name,
+                'user_name': user['user_name'],
                 'rank': rank,
-                'rating': user.rating,
+                'rating': user['rating'],
                 'effective_rating': effective_rating,
-                'stay_flag': user.stay_flag,
-                'win_count': user.win_count,
-                'loss_count': user.loss_count,
-                'total_matches': user.total_matches,
-                'max_win_streak': user.max_win_streak,
-                'current_win_streak': user.win_streak
+                'stay_flag': user['stay_flag'],
+                'win_count': user['win_count'],
+                'loss_count': user['loss_count'],
+                'total_matches': user['total_matches'],
+                'max_win_streak': user['max_win_streak'],
+                'current_win_streak': user['win_streak']
             }
             
         except Exception as e:

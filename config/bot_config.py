@@ -8,15 +8,14 @@ from config.settings import (
     WELCOME_CHANNEL_ID, PROFILE_CHANNEL_ID, RANKING_CHANNEL_ID,
     PAST_RANKING_CHANNEL_ID, RECORD_CHANNEL_ID, PAST_RECORD_CHANNEL_ID,
     LAST_50_MATCHES_RECORD_CHANNEL_ID, MATCHING_CHANNEL_ID,
-    PREVIOUS_RANKING_CHANNEL_ID, PREVIOUS_RECORD_CHANNEL_ID,
     COMMAND_CHANNEL_ID
 )
 from viewmodels.matchmaking_vm import MatchmakingViewModel, ResultViewModel, CancelViewModel
 from viewmodels.ranking_vm import RankingViewModel
 from views.matchmaking_view import MatchmakingView, ClassSelectView, ResultView, RateDisplayView
-from views.ranking_view import RankingView, RankingButtonView
+from views.ranking_view import RankingView, PastRankingButtonView
 from views.user_view import RegisterView, ProfileView, AchievementButtonView
-from views.record_view import CurrentSeasonRecordView, PastSeasonRecordView, LegacyRankingView, LegacyRecordView
+from views.record_view import CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView
 from models.base import db_manager
 from utils.helpers import safe_purge_channel, safe_send_message
 from utils.helpers import safe_create_thread, safe_add_user_to_thread, assign_role
@@ -248,14 +247,14 @@ def create_bot_1():
     
     @bot.slash_command(
         name="manual_result", 
-        description="二人のユーザーの間で勝者を手動で決定します。",
+        description="二人のユーザーの間で勝者とクラスを手動で決定します。",
         default_member_permissions=discord.Permissions(administrator=True)
     )
     @commands.has_permissions(administrator=True)
     async def manual_result(ctx: discord.ApplicationContext, 
-                          player1: discord.Member, player1_wins: int,
-                          player2: discord.Member, player2_wins: int):
-        """手動で試合結果を設定"""
+                          winner: discord.Member, winner_class: str,
+                          loser: discord.Member, loser_class: str):
+        """手動で試合結果を設定（新形式：勝者/敗者とクラス指定）"""
         from viewmodels.matchmaking_vm import ResultViewModel
         from models.user import UserModel
         from utils.helpers import remove_role
@@ -264,10 +263,10 @@ def create_bot_1():
         result_vm = ResultViewModel()
         
         # データベースからユーザー情報を取得
-        user1_data = user_model.get_user_by_discord_id(str(player1.id))
-        user2_data = user_model.get_user_by_discord_id(str(player2.id))
+        winner_data = user_model.get_user_by_discord_id(str(winner.id))
+        loser_data = user_model.get_user_by_discord_id(str(loser.id))
         
-        if not user1_data or not user2_data:
+        if not winner_data or not loser_data:
             await ctx.respond("指定されたユーザーがデータベースに見つかりませんでした。", ephemeral=True)
             return
         
@@ -278,40 +277,66 @@ def create_bot_1():
             else:
                 return getattr(data, attr_name, default)
         
-        user1_id = get_attr(user1_data, 'id')
-        user2_id = get_attr(user2_data, 'id')
-        user1_rating = get_attr(user1_data, 'rating', 1500)
-        user2_rating = get_attr(user2_data, 'rating', 1500)
+        winner_id = get_attr(winner_data, 'id')
+        loser_id = get_attr(loser_data, 'id')
+        winner_rating = get_attr(winner_data, 'rating', 1500)
+        loser_rating = get_attr(loser_data, 'rating', 1500)
         
-        # 結果の妥当性チェック
-        is_valid, message = result_vm.validate_result(player1_wins, player2_wins)
-        if not is_valid:
-            await ctx.respond(f"入力エラー: {message}", ephemeral=True)
+        # クラスの妥当性チェック
+        valid_classes = user_model.get_valid_classes()
+        if winner_class not in valid_classes or loser_class not in valid_classes:
+            await ctx.respond(f"無効なクラスが指定されました。有効なクラス: {', '.join(valid_classes)}", ephemeral=True)
             return
         
-        # 試合結果を確定
-        result = result_vm.finalize_match(
-            user1_id, user2_id, player1_wins, player2_wins,
-            user1_rating, user2_rating
+        # player1がwinnerかloserかを判定（IDが小さい方をplayer1とする）
+        if winner.id < loser.id:
+            # winner = player1, loser = player2
+            user1_id, user2_id = winner_id, loser_id
+            user1_won, user2_won = True, False
+            user1_rating, user2_rating = winner_rating, loser_rating
+            user1_selected_class, user2_selected_class = winner_class, loser_class
+        else:
+            # loser = player1, winner = player2  
+            user1_id, user2_id = loser_id, winner_id
+            user1_won, user2_won = False, True
+            user1_rating, user2_rating = loser_rating, winner_rating
+            user1_selected_class, user2_selected_class = loser_class, winner_class
+        
+        # 試合結果を確定（新形式）
+        result = result_vm.finalize_match_with_classes(
+            user1_id, user2_id, user1_won, user2_won,
+            user1_rating, user2_rating,
+            user1_selected_class, user2_selected_class
         )
         
         if result['success']:
             # ロールを削除
-            await remove_role(player1, "試合中")
-            await remove_role(player2, "試合中")
+            await remove_role(winner, "試合中")
+            await remove_role(loser, "試合中")
             
             # レート変動を表示
-            user1_change_sign = "+" if result['user1_rating_change'] > 0 else ""
-            user2_change_sign = "+" if result['user2_rating_change'] > 0 else ""
+            if winner.id < loser.id:
+                winner_change = result['user1_rating_change']
+                loser_change = result['user2_rating_change']
+                winner_new_rating = result['after_user1_rating']
+                loser_new_rating = result['after_user2_rating']
+            else:
+                winner_change = result['user2_rating_change']
+                loser_change = result['user1_rating_change']
+                winner_new_rating = result['after_user2_rating']
+                loser_new_rating = result['after_user1_rating']
+            
+            winner_change_sign = "+" if winner_change > 0 else ""
+            loser_change_sign = "+" if loser_change > 0 else ""
             
             await ctx.respond(
-                f"{player1.mention} vs {player2.mention} の試合結果:\n"
-                f"{player1.display_name}のレート: "
-                f"{user1_rating:.0f} -> {result['after_user1_rating']:.0f} "
-                f"({user1_change_sign}{result['user1_rating_change']:.0f})\n"
-                f"{player2.display_name}のレート: "
-                f"{user2_rating:.0f} -> {result['after_user2_rating']:.0f} "
-                f"({user2_change_sign}{result['user2_rating_change']:.0f})"
+                f"🏆 **試合結果確定**\n\n"
+                f"**勝者:** {winner.mention} ({winner_class})\n"
+                f"レート: {winner_rating:.0f} -> {winner_new_rating:.0f} "
+                f"({winner_change_sign}{winner_change:.0f})\n\n"
+                f"**敗者:** {loser.mention} ({loser_class})\n"
+                f"レート: {loser_rating:.0f} -> {loser_new_rating:.0f} "
+                f"({loser_change_sign}{loser_change:.0f})"
             )
         else:
             await ctx.respond(f"エラー: {result['message']}", ephemeral=True)
@@ -557,6 +582,7 @@ def create_bot_1():
         except ValueError as e:
             await ctx.send(f"エラー: {e}")
     
+    
     @bot.command()
     @commands.has_permissions(administrator=True)
     async def end_season(ctx):
@@ -571,12 +597,12 @@ def create_bot_1():
             ended_season = season_model.end_season()
             if ended_season:
                 # シーズン統計を確定
-                finalize_result = season_model.finalize_season(ended_season.id)
+                finalize_result = season_model.finalize_season(ended_season['id'])
                 
                 # 全ユーザーをリセット
                 reset_count = user_model.reset_users_for_new_season()
                 
-                await ctx.send(f"シーズン '{ended_season.season_name}' が終了しました。{reset_count}人のユーザーをリセットしました。")
+                await ctx.send(f"シーズン '{ended_season['season_name']}' が終了しました。{reset_count}人のユーザーをリセットしました。")
                 
                 # マッチングボタンの削除
                 matching_channel = bot.get_channel(MATCHING_CHANNEL_ID)
@@ -587,67 +613,9 @@ def create_bot_1():
                 await ctx.send("終了するシーズンが見つかりません。")
         except ValueError as e:
             await ctx.send(f"エラー: {e}")
-    
+
     return bot
 
-def create_bot_2():
-    """Bot2（ランキング・戦績担当）を作成"""
-    intents = discord.Intents.default()
-    intents.message_content = True
-    intents.members = True
-    
-    bot = commands.Bot(command_prefix='!', intents=intents)
-    bot.token = BOT_TOKEN_2
-    
-    # ViewModelの初期化
-    ranking_vm = RankingViewModel()
-    
-    @bot.event
-    async def on_ready():
-        """Bot2の起動時処理"""
-        logging.info(f'🤖 Bot2 logged in as {bot.user}')
-        
-        try:
-            await bot.sync_commands()
-            logging.info("✅ Bot2 commands synced successfully")
-        except Exception as e:
-            logging.error(f"❌ Failed to sync Bot2 commands: {e}")
-        
-        # チャンネルの初期化
-        await setup_bot2_channels(bot, ranking_vm)
-        
-        # 定期更新タスクの開始
-        update_stats_periodically.start()
-        
-        logging.info("🎉 Bot2 initialization completed successfully!")
-    
-    @tasks.loop(hours=1)
-    async def update_stats_periodically():
-        """統計情報の定期更新"""
-        try:
-            record_channel = bot.get_channel(RECORD_CHANNEL_ID)
-            past_record_channel = bot.get_channel(PAST_RECORD_CHANNEL_ID)
-            previous_record_channel = bot.get_channel(PREVIOUS_RECORD_CHANNEL_ID)
-            
-            if record_channel:
-                await safe_purge_channel(record_channel)
-                await safe_send_message(record_channel, "現在シーズンの戦績を確認できます。", view=CurrentSeasonRecordView())
-            
-            if past_record_channel:
-                await safe_purge_channel(past_record_channel)
-                await safe_send_message(past_record_channel, "今作の過去戦績を表示します。", view=PastSeasonRecordView())
-            
-            if previous_record_channel:
-                await safe_purge_channel(previous_record_channel)
-                await safe_send_message(previous_record_channel, "前作の戦績を表示します。", view=LegacyRecordView())
-            
-            # ランキングキャッシュをクリア
-            ranking_vm.clear_cache()
-            
-        except Exception as e:
-            logging.error(f"Error in update_stats_periodically: {e}")
-    
-    return bot
 
 async def setup_bot1_channels(bot, matchmaking_vm: MatchmakingViewModel):
     """Bot1のチャンネル初期化"""
@@ -682,25 +650,105 @@ async def setup_bot1_channels(bot, matchmaking_vm: MatchmakingViewModel):
     except Exception as e:
         logging.error(f"❌ Error setting up Bot1 channels: {e}")
 
+def create_bot_2():
+    """Bot2（ランキング・戦績担当）を作成"""
+    intents = discord.Intents.default()
+    intents.message_content = True
+    intents.members = True
+    
+    bot = commands.Bot(command_prefix='!', intents=intents)
+    bot.token = BOT_TOKEN_2
+    
+    # ViewModelの初期化
+    ranking_vm = RankingViewModel()
+    
+    # グローバル変数でRankingViewを保持
+    global_ranking_view = None
+    
+    @bot.event
+    async def on_ready():
+        """Bot2の起動時処理"""
+        nonlocal global_ranking_view
+        
+        logging.info(f'🤖 Bot2 logged in as {bot.user}')
+        
+        try:
+            await bot.sync_commands()
+            logging.info("✅ Bot2 commands synced successfully")
+        except Exception as e:
+            logging.error(f"❌ Failed to sync Bot2 commands: {e}")
+        
+        # チャンネルの初期化
+        global_ranking_view = await setup_bot2_channels(bot, ranking_vm)
+        
+        # 定期更新タスクの開始
+        update_stats_periodically.start()
+        
+        logging.info("🎉 Bot2 initialization completed successfully!")
+    
+    @tasks.loop(hours=1)
+    async def update_stats_periodically():
+        """統計情報の定期更新"""
+        nonlocal global_ranking_view
+        
+        try:
+            # 戦績チャンネルの更新
+            record_channel = bot.get_channel(RECORD_CHANNEL_ID)
+            past_record_channel = bot.get_channel(PAST_RECORD_CHANNEL_ID)
+            
+            if record_channel:
+                await safe_purge_channel(record_channel)
+                await safe_send_message(record_channel, "現在シーズンの戦績を確認できます。", view=CurrentSeasonRecordView())
+            
+            if past_record_channel:
+                await safe_purge_channel(past_record_channel)
+                await safe_send_message(past_record_channel, "今作の過去戦績を表示します。", view=PastSeasonRecordView())
+            
+            # ランキングキャッシュをクリア
+            ranking_vm.clear_cache()
+            
+            # レーティングランキングの更新
+            if global_ranking_view:
+                ranking_channel = bot.get_channel(RANKING_CHANNEL_ID)
+                if ranking_channel:
+                    await global_ranking_view.show_initial_rating_ranking(ranking_channel)
+                    logging.info("✅ Rating ranking updated automatically")
+            
+        except Exception as e:
+            logging.error(f"Error in update_stats_periodically: {e}")
+    
+    return bot
+
 async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
     """Bot2のチャンネル初期化"""
+    ranking_view = None
+    
     try:
         # ランキングチャンネル（今作現在）
         ranking_channel = bot.get_channel(RANKING_CHANNEL_ID)
         if ranking_channel:
             await safe_purge_channel(ranking_channel)
+            
+            # RankingViewを作成
+            ranking_view = RankingView(ranking_vm)
+            
+            # 説明メッセージとボタンを先に表示
             await safe_send_message(
                 ranking_channel,
                 "ランキングを閲覧するにはボタンを押してください。レーティングランキングは1時間ごとに更新されます。",
-                view=RankingView(ranking_vm)
+                view=ranking_view
             )
+            
+            # レーティングランキングを常時表示
+            await ranking_view.show_initial_rating_ranking(ranking_channel)
+            
             logging.info("✅ Ranking channel setup completed")
         
         # 過去ランキングチャンネル（今作過去シーズン）
         past_ranking_channel = bot.get_channel(PAST_RANKING_CHANNEL_ID)
         if past_ranking_channel:
             await safe_purge_channel(past_ranking_channel)
-            await safe_send_message(past_ranking_channel, "今作の過去ランキングを表示します。", view=RankingButtonView(ranking_vm))
+            await safe_send_message(past_ranking_channel, "今作の過去ランキングを表示します。", view=PastRankingButtonView(ranking_vm))
             logging.info("✅ Past ranking channel setup completed")
         
         # 戦績チャンネル
@@ -710,22 +758,24 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
             await safe_send_message(record_channel, "現在シーズンの戦績を確認できます。", view=CurrentSeasonRecordView())
             logging.info("✅ Record channel setup completed")
         
-        # 過去戦績チャンネル（前作対応）
-        past_record_channel = bot.get_channel(PAST_RECORD_CHANNEL_ID)
-        if past_record_channel:
-            await safe_purge_channel(past_record_channel)
-            await safe_send_message(past_record_channel, "前作の戦績を表示します。", view=LegacyRecordView())
-            logging.info("✅ Past record channel setup completed")
-        
         # 直近50戦戦績チャンネル
         last50_record_channel = bot.get_channel(LAST_50_MATCHES_RECORD_CHANNEL_ID)
         if last50_record_channel:
             await safe_purge_channel(last50_record_channel)
             await safe_send_message(last50_record_channel, "直近50戦の戦績を確認できます。", view=Last50RecordView())
-            logging.info("✅ Last 50 record channel setup completed")
+            logging.info("✅ Last 50 matches channel setup completed")
+        
+        # 過去戦績チャンネル（前作対応）
+        past_record_channel = bot.get_channel(PAST_RECORD_CHANNEL_ID)
+        if past_record_channel:
+            await safe_purge_channel(past_record_channel)
+            await safe_send_message(past_record_channel, "前作の戦績を表示します。", view=PastSeasonRecordView())
+            logging.info("✅ Past record channel setup completed")
         
     except Exception as e:
         logging.error(f"❌ Error setting up Bot2 channels: {e}")
+    
+    return ranking_view
 
 async def setup_matchmaking_channel(channel, matchmaking_vm: MatchmakingViewModel):
     """マッチングチャンネルの設定"""
@@ -746,10 +796,8 @@ def create_bots():
     """2つのBotインスタンスを作成して返す"""
     # 設定の検証
     validate_config()
-    logging.info("🔧 Configuration validated successfully")
     
     bot1 = create_bot_1()
     bot2 = create_bot_2()
     
-    logging.info("🤖 Both bots created successfully")
     return bot1, bot2

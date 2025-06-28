@@ -13,3 +13,136 @@ AttributeError: 'dict' object has no attribute 'user_name'
 In 8: Application command names must be unique
 2025-06-07 12:18:29 - ProfileButton - ERROR - Error in profile display for user 1272181129482473567: 'dict' object has no attribute 'stay_flag'
 2025-06-07 12:18:48 - ProfileButton - ERROR - Error in profile display for user 1297205403997831168: 'dict' object has no attribute 'stay_flag'
+2025-06-15 10:05:56 - RecordModel - ERROR - Error getting last 50 matches for 347651910070697986: (sqlite3.OperationalError) no such table: beyond_matches
+[SQL: 
+                SELECT 
+                    m.match_date,
+                    u1.user_name as player1_name,
+                    u2.user_name as player2_name,
+                    m.player1_wins,
+                    m.player2_wins,
+                    m.player1_rating_before,
+                    m.player2_rating_before,
+                    m.player1_rating_after,
+                    m.player2_rating_after,
+                    u.id as user_id,
+                    m.player1_id,
+                    m.player2_id
+                FROM beyond_matches m
+                JOIN beyond_users u1 ON m.player1_id = u1.id
+                JOIN beyond_users u2 ON m.player2_id = u2.id
+                JOIN beyond_users u ON u.discord_id = ?
+                WHERE (m.player1_id = u.id OR m.player2_id = u.id)
+                ORDER BY m.match_date DESC
+                LIMIT ?
+            ]
+[parameters: ('347651910070697986', 50)]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-06-15 17:27:17 - SeasonModel - ERROR - Unexpected error in _end_season: No active season found
+2025-06-15 17:51:43 - SeasonModel - ERROR - Unexpected error in _end_season: No active season found
+2025-06-15 17:53:46 - SeasonModel - ERROR - Unexpected error in _create_record: 'total_matches' is an invalid keyword argument for beyond_user_season_record
+2025-06-15 17:53:46 - SeasonModel - ERROR - Unexpected error in _finalize_season: 'total_matches' is an invalid keyword argument for beyond_user_season_record
+2025-06-15 18:03:51 - RecordModel - ERROR - Error getting last 50 matches for 556459193704644609: (sqlite3.OperationalError) no such table: beyond_matches
+[SQL: 
+                SELECT 
+                    m.match_date,
+                    u1.user_name as player1_name,
+                    u2.user_name as player2_name,
+                    m.player1_wins,
+                    m.player2_wins,
+                    m.player1_rating_before,
+                    m.player2_rating_before,
+                    m.player1_rating_after,
+                    m.player2_rating_after,
+                    u.id as user_id,
+                    m.player1_id,
+                    m.player2_id
+                FROM beyond_matches m
+                JOIN beyond_users u1 ON m.player1_id = u1.id
+                JOIN beyond_users u2 ON m.player2_id = u2.id
+                JOIN beyond_users u ON u.discord_id = ?
+                WHERE (m.player1_id = u.id OR m.player2_id = u.id)
+                ORDER BY m.match_date DESC
+                LIMIT ?
+            ]
+[parameters: ('556459193704644609', 50)]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-06-15 18:06:55 - SeasonModel - ERROR - Unexpected error in _create_record: 'max_win_streak' is an invalid keyword argument for beyond_user_season_record
+2025-06-15 18:06:55 - SeasonModel - ERROR - Unexpected error in _finalize_season: 'max_win_streak' is an invalid keyword argument for beyond_user_season_record
+2025-06-15 19:40:00 - MatchmakingViewModel - ERROR - Error in add_to_waiting_list for user 777: 'SeasonModel' object has no attribute 'is_season_active'
+2025-06-15 19:40:00 - MatchmakingViewModel - ERROR - Traceback (most recent call last):
+  File "C:\Users\owner\svRatings\viewmodels\matchmaking_vm.py", line 168, in add_to_waiting_list
+    if not self.season_model.is_season_active():
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'SeasonModel' object has no attribute 'is_season_active'
+
+2025-06-15 19:53:37 - RankingViewModel - ERROR - Error getting past season rating ranking: Instance <beyond_user_season_record at 0x1f0cca6ab40> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+2025-06-15 20:00:47 - RankingViewModel - ERROR - Error getting past season win streak ranking: 'dict' object has no attribute 'user_name'
+2025-06-15 20:01:21 - RecordModel - ERROR - Error getting last 50 matches for 1272181129482473567: (sqlite3.OperationalError) no such table: beyond_users
+[SQL: 
+                SELECT 
+                    m.match_date,
+                    u1.user_name as player1_name,
+                    u2.user_name as player2_name,
+                    m.player1_wins,
+                    m.player2_wins,
+                    m.player1_rating_before,
+                    m.player2_rating_before,
+                    m.player1_rating_after,
+                    m.player2_rating_after,
+                    u.id as user_id,
+                    m.player1_id,
+                    m.player2_id
+                FROM beyond_match_history m
+                JOIN beyond_users u1 ON m.player1_id = u1.id
+                JOIN beyond_users u2 ON m.player2_id = u2.id
+                JOIN beyond_users u ON u.discord_id = ?
+                WHERE (m.player1_id = u.id OR m.player2_id = u.id)
+                ORDER BY m.match_date DESC
+                LIMIT ?
+            ]
+[parameters: ('1272181129482473567', 50)]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-06-15 20:15:38 - RecordModel - ERROR - Error getting last 50 matches for 1272181129482473567: (sqlite3.OperationalError) no such column: m.player1_wins
+[SQL: 
+                SELECT 
+                    m.match_date,
+                    u1.user_name as player1_name,
+                    u2.user_name as player2_name,
+                    m.player1_wins,
+                    m.player2_wins,
+                    m.player1_rating_before,
+                    m.player2_rating_before,
+                    m.player1_rating_after,
+                    m.player2_rating_after,
+                    u.id as user_id,
+                    m.player1_id,
+                    m.player2_id
+                FROM beyond_match_history m
+                JOIN beyond_user u1 ON m.player1_id = u1.id
+                JOIN beyond_user u2 ON m.player2_id = u2.id
+                JOIN beyond_user u ON u.discord_id = ?
+                WHERE (m.player1_id = u.id OR m.player2_id = u.id)
+                ORDER BY m.match_date DESC
+                LIMIT ?
+            ]
+[parameters: ('1272181129482473567', 50)]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-06-15 20:30:39 - ClassSelect - ERROR - Error in class selection callback: 'beyond_user_season_record' object is not subscriptable
+2025-06-16 06:10:44 - RankingViewModel - ERROR - Error getting past season win streak ranking: 'dict' object has no attribute 'user_name'
+2025-06-16 06:19:39 - ClassSelect - ERROR - Error in class selection callback: 'beyond_user_season_record' object is not subscriptable
+2025-06-17 06:29:18 - RankingViewModel - ERROR - Error getting past season rating ranking: Instance <beyond_user_season_record at 0x288fadeb260> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+2025-06-17 06:32:49 - RankingViewModel - ERROR - Error getting win streak ranking: <class 'sqlalchemy.orm.decl_api.DeclarativeMeta'> is not a generic class
+2025-06-17 06:33:01 - RankingViewModel - ERROR - Error getting past season win streak ranking: 'beyond_user_season_record' object is not subscriptable
+2025-06-17 06:34:22 - RankingViewModel - ERROR - Error getting win streak ranking: <class 'sqlalchemy.orm.decl_api.DeclarativeMeta'> is not a generic class
+2025-06-17 06:34:24 - RankingViewModel - ERROR - Error getting rating ranking: <class 'sqlalchemy.orm.decl_api.DeclarativeMeta'> is not a generic class
+2025-06-17 06:34:26 - RankingViewModel - ERROR - Error getting win rate ranking: <class 'sqlalchemy.orm.decl_api.DeclarativeMeta'> is not a generic class
+2025-06-17 06:34:39 - RankingViewModel - ERROR - Error getting past season win streak ranking: <class 'sqlalchemy.orm.decl_api.DeclarativeMeta'> is not a generic class
+2025-06-17 06:34:45 - RankingViewModel - ERROR - Error getting past season win rate ranking: <class 'sqlalchemy.orm.decl_api.DeclarativeMeta'> is not a generic class
+2025-06-17 06:39:03 - RankingViewModel - ERROR - Error getting past season win streak ranking: 'beyond_user_season_record' object is not subscriptable
+2025-06-17 06:39:07 - RankingViewModel - ERROR - Error getting past season win rate ranking: 'beyond_user_season_record' object is not subscriptable
+2025-06-17 06:40:01 - ClassSelect - ERROR - Error in class selection callback: 'beyond_user_season_record' object is not subscriptable
+2025-06-17 06:46:46 - ClassSelect - ERROR - Error in class selection callback: 'beyond_user_season_record' object is not subscriptable
+2025-06-17 06:48:42 - ClassSelect - ERROR - Error in class selection callback: 'beyond_user_season_record' object is not subscriptable
+2025-06-26 06:21:07 - ClassSelect - ERROR - Error in class selection callback: Instance <beyond_match_history at 0x19de71afce0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+2025-06-29 08:28:54 - RegisterButton - ERROR - Error deleting thread 1388662346066563072: 'Thread' object has no attribute 'fetch'

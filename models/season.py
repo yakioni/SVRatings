@@ -19,7 +19,7 @@ class SeasonModel(BaseModel):
         """現在のシーズンを取得（データをコピーして返す）"""
         def _get_current(session: Session):
             season = session.query(self.Season).filter(
-                self.Season.end_date == None
+                self.Season.end_date.is_(None)
             ).order_by(desc(self.Season.id)).first()
             
             if season:
@@ -61,7 +61,7 @@ class SeasonModel(BaseModel):
         """現在のシーズンIDを取得"""
         def _get_current_id(session: Session):
             season = session.query(self.Season).filter(
-                self.Season.end_date == None
+                self.Season.end_date.is_(None)
             ).order_by(desc(self.Season.id)).first()
             return season.id if season else None
         
@@ -87,7 +87,7 @@ class SeasonModel(BaseModel):
         def _create_season(session: Session):
             # 既存のアクティブシーズンをチェック
             active_season = session.query(self.Season).filter(
-                self.Season.end_date == None
+                self.Season.end_date.is_(None)
             ).first()
             
             if active_season:
@@ -127,7 +127,7 @@ class SeasonModel(BaseModel):
         """現在のシーズンを終了"""
         def _end_season(session: Session):
             current_season = session.query(self.Season).filter(
-                self.Season.end_date == None
+                self.Season.end_date.is_(None)
             ).order_by(desc(self.Season.id)).first()
             
             if not current_season:

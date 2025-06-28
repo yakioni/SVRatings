@@ -16,9 +16,6 @@ class BotManager:
         try:
             # 最初にログ設定を実行
             setup_logging()
-            logging.info("🚀 Discord Bot Manager Starting...")
-            logging.info("✅ Logging setup completed")
-            
             # 2つのボットインスタンスを作成
             logging.info("🤖 Creating bot instances...")
             bot1, bot2 = create_bots()
@@ -52,7 +49,6 @@ class BotManager:
     
     def signal_handler(self):
         """シグナル受信時の処理"""
-        logging.info("📡 Received signal, shutting down...")
         self.running = False
         
     async def cleanup(self):

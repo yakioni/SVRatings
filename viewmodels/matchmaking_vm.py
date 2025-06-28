@@ -29,6 +29,25 @@ def calculate_rating_change(player_rating: float, opponent_rating: float,
     
     return rating_change
 
+def calculate_rating_change_from_result(player_rating: float, opponent_rating: float, 
+                                       player_won: bool) -> float:
+    """勝敗結果からレーティング変動を計算"""
+    rating_diff = player_rating - opponent_rating
+    increment_per_win = RATING_DIFF_MULTIPLIER * abs(rating_diff)
+    
+    if player_rating > opponent_rating:
+        if player_won:
+            rating_change = BASE_RATING_CHANGE - increment_per_win
+        else:
+            rating_change = -(BASE_RATING_CHANGE + increment_per_win)
+    else:
+        if player_won:
+            rating_change = BASE_RATING_CHANGE + increment_per_win
+        else:
+            rating_change = -(BASE_RATING_CHANGE - increment_per_win)
+    
+    return rating_change
+
 class MatchmakingViewModel:
     """マッチング関連のビジネスロジック"""
     
@@ -52,11 +71,6 @@ class MatchmakingViewModel:
         
         self.logger.info("🏗️ MatchmakingViewModel initialized")
         
-    def set_match_creation_callback(self, callback):
-        """マッチ作成時のコールバックを設定"""
-        self.match_creation_callback = callback
-        self.logger.info(f"🔗 Match creation callback set: {callback.__name__ if hasattr(callback, '__name__') else str(callback)}")
-    
     def set_match_creation_callback(self, callback):
         """マッチ作成時のコールバックを設定"""
         self.match_creation_callback = callback
@@ -495,7 +509,7 @@ class ResultViewModel:
         self.logger = logging.getLogger(self.__class__.__name__)
     
     def validate_result(self, player1_wins: int, player2_wins: int) -> Tuple[bool, str]:
-        """試合結果の妥当性をチェック"""
+        """試合結果の妥当性をチェック（旧版、後方互換性のため）"""
         if not (0 <= player1_wins <= 2 and 0 <= player2_wins <= 2):
             return False, "勝利数は0から2の間で入力してください。"
         
@@ -508,18 +522,33 @@ class ResultViewModel:
         
         return True, "OK"
     
+    def validate_match_result(self, user1_won: bool, user2_won: bool) -> Tuple[bool, str]:
+        """新しい試合結果の妥当性をチェック"""
+        if user1_won == user2_won:
+            return False, "片方は勝利、もう片方は敗北を選択してください。"
+        
+        return True, "OK"
+    
     def calculate_rating_changes(self, user1_rating: float, user2_rating: float, 
                                 user1_wins: int, user2_wins: int) -> Tuple[float, float]:
-        """レーティング変動を計算"""
+        """レーティング変動を計算（旧版）"""
         user1_change = calculate_rating_change(user1_rating, user2_rating, user1_wins, user2_wins)
         user2_change = calculate_rating_change(user2_rating, user1_rating, user2_wins, user1_wins)
+        
+        return user1_change, user2_change
+    
+    def calculate_rating_changes_from_result(self, user1_rating: float, user2_rating: float, 
+                                           user1_won: bool, user2_won: bool) -> Tuple[float, float]:
+        """勝敗結果からレーティング変動を計算"""
+        user1_change = calculate_rating_change_from_result(user1_rating, user2_rating, user1_won)
+        user2_change = calculate_rating_change_from_result(user2_rating, user1_rating, user2_won)
         
         return user1_change, user2_change
     
     def update_user_stats(self, user1_id: int, user2_id: int, 
                          user1_wins: int, user2_wins: int,
                          user1_rating_change: float, user2_rating_change: float) -> bool:
-        """ユーザーの統計を更新"""
+        """ユーザーの統計を更新（旧版）"""
         try:
             from config.database import get_session
             session = get_session()
@@ -570,9 +599,63 @@ class ResultViewModel:
                 session.close()
             return False
     
+    def update_user_stats_from_result(self, user1_id: int, user2_id: int, 
+                                     user1_won: bool, user2_won: bool,
+                                     user1_rating_change: float, user2_rating_change: float) -> bool:
+        """勝敗結果からユーザーの統計を更新"""
+        try:
+            from config.database import get_session
+            session = get_session()
+            
+            user1 = session.query(User).filter_by(id=user1_id).first()
+            user2 = session.query(User).filter_by(id=user2_id).first()
+            
+            if not user1 or not user2:
+                session.close()
+                return False
+            
+            # レーティング更新
+            user1.rating += user1_rating_change
+            user2.rating += user2_rating_change
+            
+            # 試合数更新
+            user1.total_matches += 1
+            user2.total_matches += 1
+            
+            # 勝敗数更新
+            if user1_won:
+                user1.win_count += 1
+                user2.loss_count += 1
+                # 連勝数更新
+                user1.win_streak += 1
+                user2.win_streak = 0
+                user1.max_win_streak = max(user1.max_win_streak, user1.win_streak)
+            else:
+                user2.win_count += 1
+                user1.loss_count += 1
+                # 連勝数更新
+                user2.win_streak += 1
+                user1.win_streak = 0
+                user2.max_win_streak = max(user2.max_win_streak, user2.win_streak)
+            
+            # 最新シーズンマッチフラグ
+            user1.latest_season_matched = True
+            user2.latest_season_matched = True
+            
+            session.commit()
+            session.close()
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error updating user stats from result: {e}")
+            if 'session' in locals():
+                session.rollback()
+                session.close()
+            return False
+    
     def finalize_match(self, user1_id: int, user2_id: int, user1_wins: int, user2_wins: int,
                       before_user1_rating: float, before_user2_rating: float) -> Dict[str, any]:
-        """試合を確定"""
+        """試合を確定（旧版、後方互換性のため）"""
         try:
             # 結果の妥当性チェック
             is_valid, message = self.validate_result(user1_wins, user2_wins)
@@ -611,6 +694,52 @@ class ResultViewModel:
             
         except Exception as e:
             self.logger.error(f"Error finalizing match: {e}")
+            return {'success': False, 'message': 'エラーが発生しました。'}
+    
+    def finalize_match_with_classes(self, user1_id: int, user2_id: int, 
+                                   user1_won: bool, user2_won: bool,
+                                   before_user1_rating: float, before_user2_rating: float,
+                                   user1_selected_class: str, user2_selected_class: str) -> Dict[str, any]:
+        """新しい形式の試合を確定（クラス情報付き）"""
+        try:
+            # 結果の妥当性チェック
+            is_valid, message = self.validate_match_result(user1_won, user2_won)
+            if not is_valid:
+                return {'success': False, 'message': message}
+            
+            # レーティング変動を計算
+            user1_change, user2_change = self.calculate_rating_changes_from_result(
+                before_user1_rating, before_user2_rating, user1_won, user2_won
+            )
+            
+            after_user1_rating = before_user1_rating + user1_change
+            after_user2_rating = before_user2_rating + user2_change
+            
+            # 試合記録を確定（クラス情報付き）
+            match_record = self.match_model.finalize_match_result_with_classes(
+                user1_id, user2_id, user1_won, user2_won,
+                before_user1_rating, before_user2_rating,
+                after_user1_rating, after_user2_rating,
+                user1_selected_class, user2_selected_class
+            )
+            
+            # ユーザー統計を更新
+            success = self.update_user_stats_from_result(
+                user1_id, user2_id, user1_won, user2_won,
+                user1_change, user2_change
+            )
+            
+            return {
+                'success': True,
+                'user1_rating_change': user1_change,
+                'user2_rating_change': user2_change,
+                'after_user1_rating': after_user1_rating,
+                'after_user2_rating': after_user2_rating,
+                'match_record': match_record
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error finalizing match with classes: {e}")
             return {'success': False, 'message': 'エラーが発生しました。'}
 
 class CancelViewModel:
