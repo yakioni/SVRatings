@@ -9,7 +9,7 @@ from utils.helpers import create_embed_pages
 import logging
 
 class RankingView(View):
-    """現在シーズンのランキング表示View"""
+    """現在シーズンのランキング表示View（表示専用）"""
     
     def __init__(self, ranking_vm: RankingViewModel):
         super().__init__(timeout=None)
@@ -56,8 +56,6 @@ class RankingView(View):
                     await self.show_win_streak_ranking(interaction)
                 elif custom_id == "win_rate_ranking":
                     await self.show_win_rate_ranking(interaction)
-                elif custom_id == "refresh_rating_ranking":
-                    await self.refresh_rating_ranking(interaction)
             except Exception as e:
                 self.logger.error(f"Error handling request: {e}")
     
@@ -67,10 +65,6 @@ class RankingView(View):
     
     @discord.ui.button(label="勝率ランキング", style=discord.ButtonStyle.primary, custom_id="win_rate_ranking")
     async def win_rate_button(self, button: Button, interaction: discord.Interaction):
-        pass  # 実際の処理はhandle_requestで行う
-    
-    @discord.ui.button(label="🔄 レーティング更新", style=discord.ButtonStyle.secondary, custom_id="refresh_rating_ranking")
-    async def refresh_rating_button(self, button: Button, interaction: discord.Interaction):
         pass  # 実際の処理はhandle_requestで行う
     
     async def show_initial_rating_ranking(self, channel):
@@ -94,34 +88,6 @@ class RankingView(View):
             
         except Exception as e:
             self.logger.error(f"Error showing initial rating ranking: {e}")
-    
-    async def refresh_rating_ranking(self, interaction: discord.Interaction):
-        """レーティングランキングを手動更新"""
-        try:
-            # キャッシュをクリアして新しいデータを取得
-            self.ranking_vm.clear_cache()
-            ranking = await self.ranking_vm.get_cached_ranking("rating")
-            
-            from models.season import SeasonModel
-            season_model = SeasonModel()
-            current_season_name = season_model.get_current_season_name()
-            
-            embed = discord.Embed(
-                title=f"【{current_season_name or '現在'}】レーティングランキング（更新済み）", 
-                color=discord.Color.blue()
-            )
-            
-            # 既存のメッセージを削除
-            await self.clear_rating_messages()
-            
-            # 新しいランキングを表示
-            self.rating_messages = await self.send_ranking_embed_permanent(embed, ranking, interaction.channel, "rating")
-            
-            await interaction.followup.send("レーティングランキングを更新しました。", ephemeral=True)
-            
-        except Exception as e:
-            self.logger.error(f"Error refreshing rating ranking: {e}")
-            await interaction.followup.send("ランキングの更新に失敗しました。", ephemeral=True)
     
     async def show_win_streak_ranking(self, interaction: discord.Interaction):
         """連勝数ランキングを表示"""
@@ -259,6 +225,96 @@ class RankingView(View):
                 await msg.delete()
             except discord.errors.NotFound:
                 pass
+
+
+class RankingUpdateView(View):
+    """レーティングランキング更新専用View"""
+    
+    def __init__(self, ranking_vm: RankingViewModel):
+        super().__init__(timeout=None)
+        self.ranking_vm = ranking_vm
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # セマフォで同時リクエストを制限
+        self.semaphore = asyncio.Semaphore(5)
+    
+    @discord.ui.button(label="🔄 レーティング更新", style=discord.ButtonStyle.secondary)
+    async def update_rating_button(self, button: Button, interaction: discord.Interaction):
+        """レーティング更新ボタンのコールバック"""
+        async with self.semaphore:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                await self.show_updated_rating_ranking(interaction)
+            except Exception as e:
+                self.logger.error(f"Error handling update request: {e}")
+                await interaction.followup.send("ランキングの更新に失敗しました。", ephemeral=True)
+    
+    async def show_updated_rating_ranking(self, interaction: discord.Interaction):
+        """レーティングランキングを更新して表示"""
+        try:
+            # キャッシュをクリアして新しいデータを取得
+            self.ranking_vm.clear_cache()
+            ranking = await self.ranking_vm.get_cached_ranking("rating")
+            
+            from models.season import SeasonModel
+            season_model = SeasonModel()
+            current_season_name = season_model.get_current_season_name()
+            
+            embed = discord.Embed(
+                title=f"【{current_season_name or '現在'}】レーティングランキング（更新済み）", 
+                color=discord.Color.blue()
+            )
+            
+            await self.send_ranking_embed(embed, ranking, interaction, "rating")
+            
+        except Exception as e:
+            self.logger.error(f"Error updating rating ranking: {e}")
+            await interaction.followup.send("ランキングの更新に失敗しました。", ephemeral=True)
+    
+    async def send_ranking_embed(self, embed: discord.Embed, ranking: List[Dict], 
+                               interaction: discord.Interaction, ranking_type: str):
+        """ランキングEmbedを送信（エフェメラル）"""
+        messages = []
+        
+        for i, record in enumerate(ranking, start=1):
+            if ranking_type == "rating":
+                stayed_text = " (stayed)" if record['is_stayed'] else ""
+                embed.add_field(
+                    name=f"**``` {i}位 ```**",
+                    value=f"{record['user_name']} - レート : {record['rating']}{stayed_text}",
+                    inline=False
+                )
+            
+            # Embed1メッセージあたり25フィールド制限
+            if len(embed.fields) == 25:
+                message = await interaction.followup.send(embed=embed, ephemeral=True)
+                messages.append(message)
+                embed.clear_fields()
+                # 次のページのため新しいEmbedを作成
+                from models.season import SeasonModel
+                season_model = SeasonModel()
+                current_season_name = season_model.get_current_season_name()
+                embed = discord.Embed(
+                    title=f"【{current_season_name or '現在'}】レーティングランキング（更新済み・続き）", 
+                    color=discord.Color.blue()
+                )
+        
+        if len(embed.fields) > 0:
+            message = await interaction.followup.send(embed=embed, ephemeral=True)
+            messages.append(message)
+        
+        # メッセージを一定時間後に削除
+        asyncio.create_task(self.delete_messages_after_delay(messages))
+    
+    async def delete_messages_after_delay(self, messages: List[discord.Message]):
+        """メッセージを一定時間後に削除"""
+        await asyncio.sleep(300)  # 5分後
+        for msg in messages:
+            try:
+                await msg.delete()
+            except discord.errors.NotFound:
+                pass
+
 
 class PastRankingButtonView(View):
     """過去シーズンランキング選択View"""
