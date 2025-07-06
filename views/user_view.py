@@ -441,136 +441,136 @@ class AchievementButton(Button):
             pass
     
     def get_user_achievements(self, user) -> Optional[str]:
-        """ユーザーの実績を取得"""
-        try:
-            # 遅延インポートで循環インポートを回避
-            from models.user import UserModel
-            from models.season import SeasonModel
-            
-            user_model = UserModel()
-            season_model = SeasonModel()
-            
-            # データベースからユーザーを取得
-            db_user = user_model.get_user_by_discord_id(str(user.id))
-            if not db_user:
-                return None
-            
-            # season.end_date が NULL でないシーズンを id 昇順で取得
-            seasons = season_model.get_past_seasons()
-            
-            # 各カテゴリごとの実績カウントを初期化
-            from collections import defaultdict
-            achievements_count = {
-                '最終順位': defaultdict(int),
-                '最終レート': defaultdict(int),
-                '勝率': defaultdict(int),
-            }
-            
-            # 実績があるかどうかのフラグ
-            has_achievements = False
-            
-            # 各シーズンごとに処理
-            for season in seasons:
-                season_id = season['id']
+            """ユーザーの実績を取得"""
+            try:
+                # 遅延インポートで循環インポートを回避
+                from models.user import UserModel
+                from models.season import SeasonModel
                 
-                # そのシーズンのユーザーの記録を取得
-                user_season_record = season_model.get_user_season_record(db_user['id'], season_id)
+                user_model = UserModel()
+                season_model = SeasonModel()
                 
-                if not user_season_record:
-                    continue
+                # データベースからユーザーを取得
+                db_user = user_model.get_user_by_discord_id(str(user.id))
+                if not db_user:
+                    return None
                 
-                # そのシーズンでのカテゴリごとの最高実績を格納
-                season_highest_achievements = {}
+                # season.end_date が NULL でないシーズンを id 昇順で取得
+                seasons = season_model.get_past_seasons()
                 
-                # 最終順位の実績
-                rank = user_season_record.rank
-                if rank is not None:
-                    from config.settings import RANK_ACHIEVEMENTS
-                    for level, achievement in RANK_ACHIEVEMENTS:
-                        if (
-                            (level == 1 and rank == 1) or
-                            (level == 2 and rank == 2) or
-                            (level == 3 and rank == 3) or
-                            (level == 4 and rank <= 8) or
-                            (level == 5 and rank <= 16) or
-                            (level == 6 and rank <= 100)
-                        ):
-                            season_highest_achievements['最終順位'] = (level, achievement)
-                            has_achievements = True
-                            break
+                # 各カテゴリごとの実績カウントを初期化
+                from collections import defaultdict
+                achievements_count = {
+                    '最終順位': defaultdict(int),
+                    '最終レート': defaultdict(int),
+                    '勝率': defaultdict(int),
+                }
                 
-                # 最終レートの実績
-                rating = user_season_record.rating
-                if rating is not None:
-                    rating = int(rating)
-                    # 1700以上からユーザーのレートまで100刻みで実績を設定
-                    if rating >= 1700:
-                        start_rating = 1700
-                        max_rating = (rating // 100) * 100
-                        rating_levels = []
-                        level = 1
-                        for r in range(start_rating, max_rating + 1, 100):
-                            rating_levels.append(r)
-                            level += 1
-                        
-                        # そのシーズンでの最高のレート実績を取得
-                        season_highest_rating = max(r for r in rating_levels if r <= rating)
-                        highest_achievement = f"{season_highest_rating}台"
-                        level = len([r for r in rating_levels if r <= season_highest_rating])
-                        season_highest_achievements['最終レート'] = (level, highest_achievement)
-                        has_achievements = True
+                # 実績があるかどうかのフラグ
+                has_achievements = False
                 
-                # 勝率の実績
-                total_matches = getattr(user_season_record, 'total_matches', None)
-                win_count = getattr(user_season_record, 'win_count', None)
-                if total_matches is not None and win_count is not None:
-                    if total_matches >= 50:
-                        win_rate = (win_count / total_matches) * 100
-                        from config.settings import WIN_RATE_ACHIEVEMENTS
-                        for level, achievement in WIN_RATE_ACHIEVEMENTS:
-                            threshold = 70 - (level - 1) * 5  # 70, 65, 60
-                            if win_rate >= threshold:
-                                season_highest_achievements['勝率'] = (level, achievement)
+                # 各シーズンごとに処理
+                for season in seasons:
+                    season_id = season['id']
+                    
+                    # そのシーズンのユーザーの記録を取得（修正：辞書形式で取得）
+                    user_season_record = season_model.get_user_season_record(db_user['id'], season_id)
+                    
+                    if not user_season_record:
+                        continue
+                    
+                    # そのシーズンでのカテゴリごとの最高実績を格納
+                    season_highest_achievements = {}
+                    
+                    # 最終順位の実績
+                    rank = user_season_record.get('rank')  # 修正：辞書アクセス
+                    if rank is not None:
+                        from config.settings import RANK_ACHIEVEMENTS
+                        for level, achievement in RANK_ACHIEVEMENTS:
+                            if (
+                                (level == 1 and rank == 1) or
+                                (level == 2 and rank == 2) or
+                                (level == 3 and rank == 3) or
+                                (level == 4 and rank <= 8) or
+                                (level == 5 and rank <= 16) or
+                                (level == 6 and rank <= 100)
+                            ):
+                                season_highest_achievements['最終順位'] = (level, achievement)
                                 has_achievements = True
                                 break
+                    
+                    # 最終レートの実績
+                    rating = user_season_record.get('rating')  # 修正：辞書アクセス
+                    if rating is not None:
+                        rating = int(rating)
+                        # 1700以上からユーザーのレートまで100刻みで実績を設定
+                        if rating >= 1700:
+                            start_rating = 1700
+                            max_rating = (rating // 100) * 100
+                            rating_levels = []
+                            level = 1
+                            for r in range(start_rating, max_rating + 1, 100):
+                                rating_levels.append(r)
+                                level += 1
+                            
+                            # そのシーズンでの最高のレート実績を取得
+                            season_highest_rating = max(r for r in rating_levels if r <= rating)
+                            highest_achievement = f"{season_highest_rating}台"
+                            level = len([r for r in rating_levels if r <= season_highest_rating])
+                            season_highest_achievements['最終レート'] = (level, highest_achievement)
+                            has_achievements = True
+                    
+                    # 勝率の実績
+                    total_matches = user_season_record.get('total_matches')  # 修正：辞書アクセス
+                    win_count = user_season_record.get('win_count')  # 修正：辞書アクセス
+                    if total_matches is not None and win_count is not None:
+                        if total_matches >= 50:
+                            win_rate = (win_count / total_matches) * 100
+                            from config.settings import WIN_RATE_ACHIEVEMENTS
+                            for level, achievement in WIN_RATE_ACHIEVEMENTS:
+                                threshold = 70 - (level - 1) * 5  # 70, 65, 60
+                                if win_rate >= threshold:
+                                    season_highest_achievements['勝率'] = (level, achievement)
+                                    has_achievements = True
+                                    break
+                    
+                    # 実績のカウントを更新
+                    for category, (level, achievement) in season_highest_achievements.items():
+                        achievements_count[category][achievement] += 1
                 
-                # 実績のカウントを更新
-                for category, (level, achievement) in season_highest_achievements.items():
-                    achievements_count[category][achievement] += 1
+                if not has_achievements:
+                    return None
+                
+                # 結果を整形して出力
+                output = f"**{user.display_name}さんの実績一覧**\n"
+                
+                # カテゴリごとに実績を表示
+                for category in ['最終順位', '最終レート', '勝率']:
+                    category_achievements = achievements_count.get(category, {})
+                    if category_achievements:
+                        output += f"\n**{category}：**\n"
+                        # 実績をレベル順または数値順にソート
+                        if category == '最終レート':
+                            # レートは高い順にソート
+                            sorted_achievements = sorted(
+                                category_achievements.items(),
+                                key=lambda x: self._get_rating_value(x[0]),
+                                reverse=True
+                            )
+                        else:
+                            sorted_achievements = sorted(
+                                category_achievements.items(),
+                                key=lambda x: self._get_achievement_level(category, x[0])
+                            )
+                        for ach, count in sorted_achievements:
+                            indent = '　'  # 全角スペースでインデント
+                            output += f"{indent}{ach}：**{count}回**\n"
+                
+                return output
             
-            if not has_achievements:
+            except Exception as e:
+                self.logger.error(f"実績の取得中にエラーが発生しました: {e}")
                 return None
-            
-            # 結果を整形して出力
-            output = f"**{user.display_name}さんの実績一覧**\n"
-            
-            # カテゴリごとに実績を表示
-            for category in ['最終順位', '最終レート', '勝率']:
-                category_achievements = achievements_count.get(category, {})
-                if category_achievements:
-                    output += f"\n**{category}：**\n"
-                    # 実績をレベル順または数値順にソート
-                    if category == '最終レート':
-                        # レートは高い順にソート
-                        sorted_achievements = sorted(
-                            category_achievements.items(),
-                            key=lambda x: self._get_rating_value(x[0]),
-                            reverse=True
-                        )
-                    else:
-                        sorted_achievements = sorted(
-                            category_achievements.items(),
-                            key=lambda x: self._get_achievement_level(category, x[0])
-                        )
-                    for ach, count in sorted_achievements:
-                        indent = '　'  # 全角スペースでインデント
-                        output += f"{indent}{ach}：**{count}回**\n"
-            
-            return output
-        
-        except Exception as e:
-            self.logger.error(f"実績の取得中にエラーが発生しました: {e}")
-            return None
     
     def _get_achievement_level(self, category: str, achievement_name: str) -> int:
         """実績のレベルを取得"""

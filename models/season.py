@@ -15,6 +15,24 @@ class SeasonModel(BaseModel):
         self.UserSeasonRecord = UserSeasonRecord
         self.User = User
     
+    def _user_season_record_to_dict(self, record) -> Dict[str, Any]:
+        """UserSeasonRecordオブジェクトを辞書に変換"""
+        if not record:
+            return None
+        
+        return {
+            'id': getattr(record, 'id', None),
+            'user_id': getattr(record, 'user_id', None),
+            'season_id': getattr(record, 'season_id', None),
+            'rating': getattr(record, 'rating', None),
+            'rank': getattr(record, 'rank', None),
+            'win_count': getattr(record, 'win_count', 0),
+            'loss_count': getattr(record, 'loss_count', 0),
+            'total_matches': getattr(record, 'total_matches', 0),
+            'max_win_streak': getattr(record, 'max_win_streak', 0),
+            'updated_at': getattr(record, 'updated_at', None)
+        }
+    
     def get_current_season(self) -> Optional[Season]:
         """現在のシーズンを取得（データをコピーして返す）"""
         def _get_current(session: Session):
@@ -240,21 +258,23 @@ class SeasonModel(BaseModel):
         
         return self.execute_with_session(_create_record)
     
-    def get_user_season_record(self, user_id: int, season_id: int) -> Optional[UserSeasonRecord]:
-        """ユーザーの特定シーズン記録を取得"""
+    def get_user_season_record(self, user_id: int, season_id: int) -> Optional[Dict[str, Any]]:
+        """ユーザーの特定シーズン記録を取得（辞書形式で返す）"""
         def _get_record(session: Session):
-            return session.query(self.UserSeasonRecord).filter_by(
+            record = session.query(self.UserSeasonRecord).filter_by(
                 user_id=user_id, season_id=season_id
             ).first()
+            return self._user_season_record_to_dict(record) if record else None
         
         return self.safe_execute(_get_record)
     
-    def get_user_all_season_records(self, user_id: int) -> List[UserSeasonRecord]:
-        """ユーザーの全シーズン記録を取得"""
+    def get_user_all_season_records(self, user_id: int) -> List[Dict[str, Any]]:
+        """ユーザーの全シーズン記録を取得（辞書形式で返す）"""
         def _get_all_records(session: Session):
-            return session.query(self.UserSeasonRecord).filter_by(
+            records = session.query(self.UserSeasonRecord).filter_by(
                 user_id=user_id
             ).order_by(desc(self.UserSeasonRecord.season_id)).all()
+            return [self._user_season_record_to_dict(record) for record in records]
         
         return self.safe_execute(_get_all_records) or []
     
