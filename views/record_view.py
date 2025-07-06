@@ -232,14 +232,13 @@ class Last50RecordButton(Button):
                     )
                     embeds.append(current_embed)
                 
-                # 試合結果の表示（BO1対応）
+                # 試合結果の表示
                 result_emoji = "🔴" if match['result'] == "LOSS" else "🔵"
                 rating_change_str = f"{match['rating_change']:+.0f}" if match['rating_change'] != 0 else "±0"
                 
                 field_value = (
                     f"vs {match['opponent_name']}\n"
-                    f"あなた: {match['user_class']} | 相手: {match['opponent_class']}\n"
-                    f"結果: {match['result']}\n"
+                    f"結果: {match['user_wins']}-{match['opponent_wins']} ({match['result']})\n"
                     f"レート変動: {rating_change_str}\n"
                     f"試合後レート: {match['rating_after']:.0f}"
                 )

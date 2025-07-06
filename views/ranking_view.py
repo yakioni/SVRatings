@@ -9,7 +9,11 @@ from utils.helpers import create_embed_pages
 import logging
 
 class RankingView(View):
+<<<<<<< HEAD
     """現在シーズンのランキング表示View（表示専用）"""
+=======
+    """現在シーズンのランキング表示View"""
+>>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
     
     def __init__(self, ranking_vm: RankingViewModel):
         super().__init__(timeout=None)
@@ -56,6 +60,11 @@ class RankingView(View):
                     await self.show_win_streak_ranking(interaction)
                 elif custom_id == "win_rate_ranking":
                     await self.show_win_rate_ranking(interaction)
+<<<<<<< HEAD
+=======
+                elif custom_id == "refresh_rating_ranking":
+                    await self.refresh_rating_ranking(interaction)
+>>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
             except Exception as e:
                 self.logger.error(f"Error handling request: {e}")
     
@@ -67,6 +76,13 @@ class RankingView(View):
     async def win_rate_button(self, button: Button, interaction: discord.Interaction):
         pass  # 実際の処理はhandle_requestで行う
     
+<<<<<<< HEAD
+=======
+    @discord.ui.button(label="🔄 レーティング更新", style=discord.ButtonStyle.secondary, custom_id="refresh_rating_ranking")
+    async def refresh_rating_button(self, button: Button, interaction: discord.Interaction):
+        pass  # 実際の処理はhandle_requestで行う
+    
+>>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
     async def show_initial_rating_ranking(self, channel):
         """初期レーティングランキングを表示"""
         try:
@@ -89,6 +105,37 @@ class RankingView(View):
         except Exception as e:
             self.logger.error(f"Error showing initial rating ranking: {e}")
     
+<<<<<<< HEAD
+=======
+    async def refresh_rating_ranking(self, interaction: discord.Interaction):
+        """レーティングランキングを手動更新"""
+        try:
+            # キャッシュをクリアして新しいデータを取得
+            self.ranking_vm.clear_cache()
+            ranking = await self.ranking_vm.get_cached_ranking("rating")
+            
+            from models.season import SeasonModel
+            season_model = SeasonModel()
+            current_season_name = season_model.get_current_season_name()
+            
+            embed = discord.Embed(
+                title=f"【{current_season_name or '現在'}】レーティングランキング（更新済み）", 
+                color=discord.Color.blue()
+            )
+            
+            # 既存のメッセージを削除
+            await self.clear_rating_messages()
+            
+            # 新しいランキングを表示
+            self.rating_messages = await self.send_ranking_embed_permanent(embed, ranking, interaction.channel, "rating")
+            
+            await interaction.followup.send("レーティングランキングを更新しました。", ephemeral=True)
+            
+        except Exception as e:
+            self.logger.error(f"Error refreshing rating ranking: {e}")
+            await interaction.followup.send("ランキングの更新に失敗しました。", ephemeral=True)
+    
+>>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
     async def show_win_streak_ranking(self, interaction: discord.Interaction):
         """連勝数ランキングを表示"""
         ranking = await self.ranking_vm.get_cached_ranking("win_streak")
@@ -226,6 +273,7 @@ class RankingView(View):
             except discord.errors.NotFound:
                 pass
 
+<<<<<<< HEAD
 
 class RankingUpdateView(View):
     """レーティングランキング更新専用View"""
@@ -316,6 +364,8 @@ class RankingUpdateView(View):
                 pass
 
 
+=======
+>>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
 class PastRankingButtonView(View):
     """過去シーズンランキング選択View"""
     

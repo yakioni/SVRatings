@@ -6,14 +6,14 @@ from config.settings import (
     BOT_TOKEN_1, BOT_TOKEN_2, validate_config,
     BATTLE_CHANNEL_ID, BATTLE_GUIDE_TEXT,
     WELCOME_CHANNEL_ID, PROFILE_CHANNEL_ID, RANKING_CHANNEL_ID,
-    RANKING_UPDATE_CHANNEL_ID, PAST_RANKING_CHANNEL_ID, RECORD_CHANNEL_ID, 
-    PAST_RECORD_CHANNEL_ID, LAST_50_MATCHES_RECORD_CHANNEL_ID, MATCHING_CHANNEL_ID,
+    PAST_RANKING_CHANNEL_ID, RECORD_CHANNEL_ID, PAST_RECORD_CHANNEL_ID,
+    LAST_50_MATCHES_RECORD_CHANNEL_ID, MATCHING_CHANNEL_ID,
     COMMAND_CHANNEL_ID
 )
 from viewmodels.matchmaking_vm import MatchmakingViewModel, ResultViewModel, CancelViewModel
 from viewmodels.ranking_vm import RankingViewModel
 from views.matchmaking_view import MatchmakingView, ClassSelectView, ResultView, RateDisplayView
-from views.ranking_view import RankingView, RankingUpdateView, PastRankingButtonView
+from views.ranking_view import RankingView, PastRankingButtonView
 from views.user_view import RegisterView, ProfileView, AchievementButtonView
 from views.record_view import CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView
 from models.base import db_manager
@@ -729,7 +729,7 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
         if ranking_channel:
             await safe_purge_channel(ranking_channel)
             
-            # RankingViewを作成（更新ボタンなし）
+            # RankingViewを作成
             ranking_view = RankingView(ranking_vm)
             
             # 説明メッセージとボタンを先に表示
@@ -743,24 +743,6 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
             await ranking_view.show_initial_rating_ranking(ranking_channel)
             
             logging.info("✅ Ranking channel setup completed")
-        
-        # ランキング更新チャンネル（新規追加）
-        ranking_update_channel = bot.get_channel(RANKING_UPDATE_CHANNEL_ID)
-        if ranking_update_channel:
-            await safe_purge_channel(ranking_update_channel)
-            
-            # RankingUpdateViewを作成
-            ranking_update_view = RankingUpdateView(ranking_vm)
-            
-            await safe_send_message(
-                ranking_update_channel,
-                "**ランキング更新**\n"
-                "以下のボタンを押すと、そのランキングの最新版があなたにだけ表示されます。\n"
-                "メッセージは5分後に自動的に削除されます。",
-                view=ranking_update_view
-            )
-            
-            logging.info("✅ Ranking update channel setup completed")
         
         # 過去ランキングチャンネル（今作過去シーズン）
         past_ranking_channel = bot.get_channel(PAST_RANKING_CHANNEL_ID)
