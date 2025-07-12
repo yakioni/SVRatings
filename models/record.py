@@ -63,11 +63,7 @@ class RecordModel:
             return None
     
     def get_user_last_n_matches(self, discord_id: str, limit: int = 50) -> List[Dict]:
-<<<<<<< HEAD
         """ユーザーの直近N戦の試合履歴を取得（BO1対応、クラス情報付き）"""
-=======
-        """ユーザーの直近N戦の試合履歴を取得"""
->>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
         try:
             # まずはbeyond_match_historyテーブルから試してみる
             query = text("""
@@ -91,7 +87,6 @@ class RecordModel:
                     m.user2_rating_change,
                     u.id as user_id,
                     m.user1_id,
-<<<<<<< HEAD
                     m.user2_id,
                     m.user1_selected_class,
                     m.user2_selected_class,
@@ -99,9 +94,6 @@ class RecordModel:
                     m.user1_class_b,
                     m.user2_class_a,
                     m.user2_class_b
-=======
-                    m.user2_id
->>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
                 FROM beyond_match_history m
                 JOIN beyond_user u1 ON m.user1_id = u1.id
                 JOIN beyond_user u2 ON m.user2_id = u2.id
@@ -126,7 +118,6 @@ class RecordModel:
                     rating_before = row[3]
                     rating_after = row[5]
                     rating_change = row[7]
-<<<<<<< HEAD
                     # クラス情報を取得（新しいカラムを優先）
                     user_selected_class = row[12]  # user1_selected_class
                     opponent_selected_class = row[13]  # user2_selected_class
@@ -135,13 +126,10 @@ class RecordModel:
                         user_selected_class = row[14] or row[15]  # user1_class_a or user1_class_b
                     if not opponent_selected_class:
                         opponent_selected_class = row[16] or row[17]  # user2_class_a or user2_class_b
-=======
->>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
                 else:
                     rating_before = row[4]
                     rating_after = row[6]
                     rating_change = row[8]
-<<<<<<< HEAD
                     # クラス情報を取得（新しいカラムを優先）
                     user_selected_class = row[13]  # user2_selected_class
                     opponent_selected_class = row[12]  # user1_selected_class
@@ -162,28 +150,6 @@ class RecordModel:
                     'rating_after': rating_after,
                     'user_class': user_selected_class or "不明",
                     'opponent_class': opponent_selected_class or "不明"
-=======
-                
-                result_text = "WIN" if row[2] == 1 else "LOSS"
-                
-                # user_wins と opponent_wins を計算（簡略化）
-                if row[2] == 1:  # ユーザーが勝利
-                    user_wins = 2  # 仮の値
-                    opponent_wins = 1
-                else:  # ユーザーが敗北
-                    user_wins = 1
-                    opponent_wins = 2
-                
-                matches.append({
-                    'match_date': row[0],
-                    'opponent_name': row[1],
-                    'user_wins': user_wins,
-                    'opponent_wins': opponent_wins,
-                    'result': result_text,
-                    'rating_change': rating_change,
-                    'rating_before': rating_before,
-                    'rating_after': rating_after
->>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
                 })
             
             return matches
@@ -209,15 +175,11 @@ class RecordModel:
                     m.player2_rating_after,
                     u.id as user_id,
                     m.player1_id,
-<<<<<<< HEAD
                     m.player2_id,
                     m.player1_class_a,
                     m.player1_class_b,
                     m.player2_class_a,
                     m.player2_class_b
-=======
-                    m.player2_id
->>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
                 FROM beyond_matches m
                 JOIN beyond_users u1 ON m.player1_id = u1.id
                 JOIN beyond_users u2 ON m.player2_id = u2.id
@@ -243,24 +205,18 @@ class RecordModel:
                     opponent_name = row[2]
                     rating_before = row[5]
                     rating_after = row[7]
-<<<<<<< HEAD
                     # 旧形式では使用クラスは不明
                     user_class = row[12] or row[13] or "不明"  # player1_class_a or player1_class_b
                     opponent_class = row[14] or row[15] or "不明"  # player2_class_a or player2_class_b
-=======
->>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
                 else:
                     user_wins = row[4]
                     opponent_wins = row[3]
                     opponent_name = row[1]
                     rating_before = row[6]
                     rating_after = row[8]
-<<<<<<< HEAD
                     # 旧形式では使用クラスは不明
                     user_class = row[14] or row[15] or "不明"  # player2_class_a or player2_class_b
                     opponent_class = row[12] or row[13] or "不明"  # player1_class_a or player1_class_b
-=======
->>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
                 
                 result_text = "WIN" if user_wins > opponent_wins else "LOSS"
                 rating_change = rating_after - rating_before
@@ -268,21 +224,12 @@ class RecordModel:
                 matches.append({
                     'match_date': row[0],
                     'opponent_name': opponent_name,
-<<<<<<< HEAD
                     'result': result_text,
                     'rating_change': rating_change,
                     'rating_before': rating_before,
                     'rating_after': rating_after,
                     'user_class': user_class,
                     'opponent_class': opponent_class
-=======
-                    'user_wins': user_wins,
-                    'opponent_wins': opponent_wins,
-                    'result': result_text,
-                    'rating_change': rating_change,
-                    'rating_before': rating_before,
-                    'rating_after': rating_after
->>>>>>> 5fe978043b8548aa18d399cf55751f786e839b02
                 })
             
             return matches

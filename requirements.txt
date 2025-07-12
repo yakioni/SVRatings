@@ -3,7 +3,6 @@ py-cord==2.4.1
 
 # データベース関連
 SQLAlchemy==2.0.23
-sqlite3
 
 # 設定・環境変数
 python-dotenv==1.0.0
@@ -17,14 +16,3 @@ jpholiday==0.1.8
 # ファイル監視
 watchdog==3.0.0
 
-# 型ヒント
-typing-extensions==4.8.0
-
-# ログ関連
-logging
-
-# 非同期処理
-asyncio
-
-# その他ユーティリティ
-unicodedata
