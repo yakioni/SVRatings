@@ -459,7 +459,6 @@ class AchievementButton(Button):
             seasons = season_model.get_past_seasons()
             
             # 各カテゴリごとの実績カウントを初期化
-            from collections import defaultdict
             achievements_count = {
                 '最終順位': defaultdict(int),
                 '最終レート': defaultdict(int),
@@ -469,21 +468,36 @@ class AchievementButton(Button):
             # 実績があるかどうかのフラグ
             has_achievements = False
             
-            # 各シーズンごとに処理
+            # 各シーズンごとに処理（セッション管理対応）
             for season in seasons:
                 season_id = season['id']
                 
-                # そのシーズンのユーザーの記録を取得
-                user_season_record = season_model.get_user_season_record(db_user['id'], season_id)
+                # そのシーズンのユーザーの記録を取得（セッション内で安全に処理）
+                def _get_season_record(session):
+                    from config.database import UserSeasonRecord
+                    record = session.query(UserSeasonRecord).filter_by(
+                        user_id=db_user['id'], season_id=season_id
+                    ).first()
+                    
+                    if record:
+                        return {
+                            'rank': record.rank,
+                            'rating': record.rating,
+                            'total_matches': record.total_matches,
+                            'win_count': record.win_count
+                        }
+                    return None
                 
-                if not user_season_record:
+                user_season_record_data = season_model.safe_execute(_get_season_record)
+                
+                if not user_season_record_data:
                     continue
                 
                 # そのシーズンでのカテゴリごとの最高実績を格納
                 season_highest_achievements = {}
                 
                 # 最終順位の実績
-                rank = user_season_record.rank
+                rank = user_season_record_data['rank']
                 if rank is not None:
                     from config.settings import RANK_ACHIEVEMENTS
                     for level, achievement in RANK_ACHIEVEMENTS:
@@ -500,7 +514,7 @@ class AchievementButton(Button):
                             break
                 
                 # 最終レートの実績
-                rating = user_season_record.rating
+                rating = user_season_record_data['rating']
                 if rating is not None:
                     rating = int(rating)
                     # 1700以上からユーザーのレートまで100刻みで実績を設定
@@ -521,8 +535,8 @@ class AchievementButton(Button):
                         has_achievements = True
                 
                 # 勝率の実績
-                total_matches = getattr(user_season_record, 'total_matches', None)
-                win_count = getattr(user_season_record, 'win_count', None)
+                total_matches = user_season_record_data['total_matches']
+                win_count = user_season_record_data['win_count']
                 if total_matches is not None and win_count is not None:
                     if total_matches >= 50:
                         win_rate = (win_count / total_matches) * 100
@@ -570,6 +584,8 @@ class AchievementButton(Button):
         
         except Exception as e:
             self.logger.error(f"実績の取得中にエラーが発生しました: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return None
     
     def _get_achievement_level(self, category: str, achievement_name: str) -> int:

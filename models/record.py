@@ -1,250 +1,398 @@
-"""
-戦績データのモデル（前作データベース対応も含む）
-"""
+import discord
+from discord.ui import View, Button, Select
+import asyncio
+from typing import List, Optional
+from sqlalchemy import desc
+from models.user import UserModel
+from models.season import SeasonModel
+from models.match import MatchModel
 import logging
-from typing import List, Dict, Optional, Any
-from sqlalchemy import text
-from config.database import engine
-from sqlalchemy.orm import sessionmaker
 
-class RecordModel:
-    """戦績データのモデル"""
+class CurrentSeasonRecordView(View):
+    """現在シーズンの戦績表示View"""
     
     def __init__(self):
-        self.engine = engine
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        super().__init__(timeout=None)
+        button = Button(label="現在のシーズン", style=discord.ButtonStyle.primary)
+        
+        async def button_callback(interaction):
+            await self.show_class_select(interaction)
+        
+        button.callback = button_callback
+        self.add_item(button)
+    
+    async def show_class_select(self, interaction: discord.Interaction):
+        """クラス選択を表示"""
+        user_model = UserModel()
+        user = user_model.get_user_by_discord_id(str(interaction.user.id))
+        
+        # latest_season_matched が False なら "未参加です" と返して終了
+        if user and not user['latest_season_matched']:
+            await interaction.response.send_message("未参加です", ephemeral=True)
+            return
+        
+        season_model = SeasonModel()
+        season = season_model.get_current_season()
+        
+        if season:
+            await interaction.response.send_message(
+                content="クラスを選択してください:", 
+                view=ClassSelectView(season_id=season.id), 
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("シーズンが見つかりません。", ephemeral=True)
+
+class PastSeasonRecordView(View):
+    """過去シーズンの戦績表示View"""
+    
+    def __init__(self):
+        super().__init__(timeout=None)
+        button = Button(label="過去のシーズン", style=discord.ButtonStyle.secondary)
+        
+        async def button_callback(interaction):
+            await self.show_season_select(interaction)
+        
+        button.callback = button_callback
+        self.add_item(button)
+    
+    async def show_season_select(self, interaction: discord.Interaction):
+        """シーズン選択を表示"""
+        season_model = SeasonModel()
+        seasons = season_model.get_past_seasons()
+        
+        options = [
+            discord.SelectOption(label="全シーズン", value="all")
+        ]
+        
+        used_values = set()
+        for season in seasons:
+            value = str(season['id'])
+            if value in used_values:
+                # 重複を避けるためにユニークな値を生成
+                value = f"{season['id']}_{season['season_name']}"
+            options.append(discord.SelectOption(label=season['season_name'], value=value))
+            used_values.add(value)
+        
+        select = Select(placeholder="シーズンを選択してください...", options=options)
+        
+        async def select_callback(select_interaction):
+            if not select_interaction.response.is_done():
+                await select_interaction.response.defer(ephemeral=True)
+            
+            selected_season_id = select_interaction.data['values'][0]
+            
+            if selected_season_id == "all":
+                # 全シーズンを選択した場合
+                await select_interaction.followup.send(
+                    content="クラスを選択してください:", 
+                    view=ClassSelectView(season_id=None),
+                    ephemeral=True
+                )
+            else:
+                selected_season_id = int(selected_season_id.split('_')[0])
+                user_model = UserModel()
+                user = user_model.get_user_by_discord_id(str(select_interaction.user.id))
+                
+                if not user:
+                    await select_interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
+                    return
+                
+                # ユーザーが選択したシーズンに参加しているか確認
+                season_model = SeasonModel()
+                user_record = season_model.get_user_season_record(user['id'], selected_season_id)
+                
+                if not user_record:
+                    message = await select_interaction.followup.send("未参加です。", ephemeral=True)
+                    await asyncio.sleep(10)
+                    await message.delete()
+                    return
+                
+                # ユーザーがシーズンに参加している場合、クラスを選択させる
+                await select_interaction.followup.send(
+                    content="クラスを選択してください:", 
+                    view=ClassSelectView(season_id=selected_season_id),
+                    ephemeral=True
+                )
+        
+        select.callback = select_callback
+        view = View()
+        view.add_item(select)
+        
+        await interaction.response.send_message("シーズンを選択してください:", view=view, ephemeral=True)
+        
+        await asyncio.sleep(15)
+        try:
+            await interaction.delete_original_response()
+        except discord.errors.NotFound:
+            pass
+
+class ClassSelectView(View):
+    """クラス選択View（単一クラスまたは全クラスのみ選択可能）"""
+    
+    def __init__(self, season_id: Optional[int] = None):
+        super().__init__(timeout=None)
+        self.add_item(ClassSelect(season_id))
+
+class ClassSelect(Select):
+    """クラス選択セレクト（単一クラスまたは全クラスのみ選択可能）"""
+    
+    def __init__(self, season_id: Optional[int] = None):
+        self.season_id = season_id
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # データベースからクラス名を取得
+        user_model = UserModel()
+        valid_classes = user_model.get_valid_classes()
+        
+        options = [
+            discord.SelectOption(label="全クラス", value="all_classes")
+        ] + [discord.SelectOption(label=cls, value=cls) for cls in valid_classes]
+        
+        super().__init__(
+            placeholder="クラスを選択してください...", 
+            min_values=1, 
+            max_values=1,  # 1つのみ選択可能に変更
+            options=options
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """クラス選択のコールバック"""
+        selected_class = self.values[0]
+        user_id = interaction.user.id
+        
+        # インタラクションのレスポンスを一度行う
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # RecordViewModelを遅延インポート
+            from viewmodels.record_vm import RecordViewModel
+            record_vm = RecordViewModel()
+            
+            if selected_class == "all_classes":
+                if self.season_id:
+                    await record_vm.show_season_stats(interaction, user_id, self.season_id)
+                else:
+                    await record_vm.show_all_time_stats(interaction, user_id)
+            else:
+                # 単一クラスを選択した場合
+                await record_vm.show_class_stats(interaction, user_id, selected_class, self.season_id)
+        
+        except Exception as e:
+            self.logger.error(f"Error in class selection callback: {e}")
+            await interaction.followup.send("エラーが発生しました。", ephemeral=True)
+        
+        # インタラクションメッセージを削除する
+        try:
+            await interaction.delete_original_response()
+        except discord.errors.NotFound:
+            pass
+
+class Last50RecordView(View):
+    """直近50戦の戦績表示View"""
+    
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(Last50RecordButton())
+
+class Last50RecordButton(Button):
+    """直近50戦戦績表示ボタン"""
+    
+    def __init__(self):
+        super().__init__(label="直近50戦の戦績", style=discord.ButtonStyle.primary)
         self.logger = logging.getLogger(self.__class__.__name__)
     
-    def get_user_current_season_record(self, discord_id: str) -> Optional[Dict]:
-        """ユーザーの現在シーズン戦績を取得"""
+    async def callback(self, interaction: discord.Interaction):
+        """直近50戦戦績表示のコールバック"""
         try:
-            query = text("""
-                SELECT 
-                    u.user_name,
-                    u.rating,
-                    COUNT(m.id) as total_matches,
-                    SUM(CASE WHEN 
-                        (m.player1_id = u.id AND m.player1_wins > m.player2_wins) OR 
-                        (m.player2_id = u.id AND m.player2_wins > m.player1_wins) 
-                        THEN 1 ELSE 0 END) as wins,
-                    SUM(CASE WHEN 
-                        (m.player1_id = u.id AND m.player1_wins < m.player2_wins) OR 
-                        (m.player2_id = u.id AND m.player2_wins < m.player1_wins) 
-                        THEN 1 ELSE 0 END) as losses
-                FROM beyond_users u
-                LEFT JOIN beyond_matches m ON (u.id = m.player1_id OR u.id = m.player2_id)
-                WHERE u.discord_id = :discord_id
-                GROUP BY u.id, u.user_name, u.rating
-            """)
+            await interaction.response.defer(ephemeral=True)
             
-            result = self.session.execute(query, {'discord_id': discord_id})
-            row = result.fetchone()
+            # MatchModelを使用して直近50戦のデータを取得
+            from models.match import MatchModel
+            from models.user import UserModel
             
-            if row:
-                total_matches = row[2] or 0
-                wins = row[3] or 0
-                losses = row[4] or 0
-                win_rate = (wins / total_matches * 100) if total_matches > 0 else 0
-                
-                return {
-                    'user_name': row[0],
-                    'rating': row[1] or 1500,
-                    'total_matches': total_matches,
-                    'wins': wins,
-                    'losses': losses,
-                    'win_rate': win_rate
-                }
+            user_model = UserModel()
+            match_model = MatchModel()
             
-            return None
+            # ユーザー情報を取得
+            user_data = user_model.get_user_by_discord_id(str(interaction.user.id))
+            if not user_data:
+                await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
+                return
             
-        except Exception as e:
-            self.logger.error(f"Error getting current season record for {discord_id}: {e}")
-            return None
-    
-    def get_user_last_n_matches(self, discord_id: str, limit: int = 50) -> List[Dict]:
-        """ユーザーの直近N戦の試合履歴を取得（BO1対応、クラス情報付き）"""
-        try:
-            # まずはbeyond_match_historyテーブルから試してみる
-            query = text("""
-                SELECT 
-                    m.match_date,
-                    CASE 
-                        WHEN m.user1_id = u.id THEN u2.user_name
-                        ELSE u1.user_name
-                    END as opponent_name,
-                    CASE 
-                        WHEN m.user1_id = u.id THEN 
-                            CASE WHEN m.winner_user_id = u.id THEN 1 ELSE 0 END
-                        ELSE 
-                            CASE WHEN m.winner_user_id = u.id THEN 1 ELSE 0 END
-                    END as user_won,
-                    m.before_user1_rating,
-                    m.before_user2_rating,
-                    m.after_user1_rating,
-                    m.after_user2_rating,
-                    m.user1_rating_change,
-                    m.user2_rating_change,
-                    u.id as user_id,
-                    m.user1_id,
-                    m.user2_id,
-                    m.user1_selected_class,
-                    m.user2_selected_class,
-                    m.user1_class_a,
-                    m.user1_class_b,
-                    m.user2_class_a,
-                    m.user2_class_b
-                FROM beyond_match_history m
-                JOIN beyond_user u1 ON m.user1_id = u1.id
-                JOIN beyond_user u2 ON m.user2_id = u2.id
-                JOIN beyond_user u ON u.discord_id = :discord_id
-                WHERE (m.user1_id = u.id OR m.user2_id = u.id)
-                    AND m.winner_user_id IS NOT NULL
-                ORDER BY m.match_date DESC
-                LIMIT :limit
-            """)
-            
-            result = self.session.execute(query, {
-                'discord_id': discord_id,
-                'limit': limit
-            })
-            
-            matches = []
-            for row in result:
-                user_id = row[9]
-                is_player1 = (user_id == row[10])
-                
-                if is_player1:
-                    rating_before = row[3]
-                    rating_after = row[5]
-                    rating_change = row[7]
-                    # クラス情報を取得（新しいカラムを優先）
-                    user_selected_class = row[12]  # user1_selected_class
-                    opponent_selected_class = row[13]  # user2_selected_class
-                    # 新しいカラムがNullの場合は古いカラムを使用
-                    if not user_selected_class:
-                        user_selected_class = row[14] or row[15]  # user1_class_a or user1_class_b
-                    if not opponent_selected_class:
-                        opponent_selected_class = row[16] or row[17]  # user2_class_a or user2_class_b
+            # user_dataが辞書かオブジェクトかを判定して適切にアクセス
+            def get_attr(data, attr_name, default=None):
+                if isinstance(data, dict):
+                    return data.get(attr_name, default)
                 else:
-                    rating_before = row[4]
-                    rating_after = row[6]
-                    rating_change = row[8]
-                    # クラス情報を取得（新しいカラムを優先）
-                    user_selected_class = row[13]  # user2_selected_class
-                    opponent_selected_class = row[12]  # user1_selected_class
-                    # 新しいカラムがNullの場合は古いカラムを使用
-                    if not user_selected_class:
-                        user_selected_class = row[16] or row[17]  # user2_class_a or user2_class_b
-                    if not opponent_selected_class:
-                        opponent_selected_class = row[14] or row[15]  # user1_class_a or user1_class_b
+                    return getattr(data, attr_name, default)
+            
+            user_id = get_attr(user_data, 'id')
+            user_name = get_attr(user_data, 'user_name')
+            
+            # 試合履歴を取得
+            matches = match_model.get_user_match_history(user_id, 50)
+            
+            if not matches:
+                await interaction.followup.send("試合履歴が見つかりません。", ephemeral=True)
+                return
+            
+            # Embedを作成して試合履歴を表示
+            embeds = []
+            current_embed = None
+            matches_per_embed = 10
+            
+            for i, match in enumerate(matches):
+                # 10試合ごとに新しいEmbedを作成
+                if i % matches_per_embed == 0:
+                    current_embed = discord.Embed(
+                        title=f"{user_name} の直近50戦 (Page {i//matches_per_embed + 1})",
+                        color=discord.Color.blue()
+                    )
+                    embeds.append(current_embed)
                 
-                result_text = "WIN" if row[2] == 1 else "LOSS"
-                
-                matches.append({
-                    'match_date': row[0],
-                    'opponent_name': row[1],
-                    'result': result_text,
-                    'rating_change': rating_change,
-                    'rating_before': rating_before,
-                    'rating_after': rating_after,
-                    'user_class': user_selected_class or "不明",
-                    'opponent_class': opponent_selected_class or "不明"
-                })
-            
-            return matches
-            
-        except Exception as e:
-            self.logger.error(f"Error getting last {limit} matches for {discord_id}: {e}")
-            # fallback to old table structure
-            return self._get_user_last_n_matches_legacy(discord_id, limit)
-    
-    def _get_user_last_n_matches_legacy(self, discord_id: str, limit: int = 50) -> List[Dict]:
-        """ユーザーの直近N戦の試合履歴を取得（旧テーブル構造）"""
-        try:
-            query = text("""
-                SELECT 
-                    m.match_date,
-                    u1.user_name as player1_name,
-                    u2.user_name as player2_name,
-                    m.player1_wins,
-                    m.player2_wins,
-                    m.player1_rating_before,
-                    m.player2_rating_before,
-                    m.player1_rating_after,
-                    m.player2_rating_after,
-                    u.id as user_id,
-                    m.player1_id,
-                    m.player2_id,
-                    m.player1_class_a,
-                    m.player1_class_b,
-                    m.player2_class_a,
-                    m.player2_class_b
-                FROM beyond_matches m
-                JOIN beyond_users u1 ON m.player1_id = u1.id
-                JOIN beyond_users u2 ON m.player2_id = u2.id
-                JOIN beyond_users u ON u.discord_id = :discord_id
-                WHERE (m.player1_id = u.id OR m.player2_id = u.id)
-                ORDER BY m.match_date DESC
-                LIMIT :limit
-            """)
-            
-            result = self.session.execute(query, {
-                'discord_id': discord_id,
-                'limit': limit
-            })
-            
-            matches = []
-            for row in result:
-                user_id = row[9]
-                is_player1 = (user_id == row[10])
-                
-                if is_player1:
-                    user_wins = row[3]
-                    opponent_wins = row[4]
-                    opponent_name = row[2]
-                    rating_before = row[5]
-                    rating_after = row[7]
-                    # 旧形式では使用クラスは不明
-                    user_class = row[12] or row[13] or "不明"  # player1_class_a or player1_class_b
-                    opponent_class = row[14] or row[15] or "不明"  # player2_class_a or player2_class_b
+                # 対戦相手名を取得
+                if match['user1_id'] == user_id:
+                    opponent_data = user_model.get_user_by_id(match['user2_id'])
+                    user_rating_change = match['user1_rating_change']
+                    after_rating = match['after_user1_rating']
+                    before_rating = match['before_user1_rating']
+                    user_won = match['winner_user_id'] == user_id
                 else:
-                    user_wins = row[4]
-                    opponent_wins = row[3]
-                    opponent_name = row[1]
-                    rating_before = row[6]
-                    rating_after = row[8]
-                    # 旧形式では使用クラスは不明
-                    user_class = row[14] or row[15] or "不明"  # player2_class_a or player2_class_b
-                    opponent_class = row[12] or row[13] or "不明"  # player1_class_a or player1_class_b
+                    opponent_data = user_model.get_user_by_id(match['user1_id'])
+                    user_rating_change = match['user2_rating_change']
+                    after_rating = match['after_user2_rating']
+                    before_rating = match['before_user2_rating']
+                    user_won = match['winner_user_id'] == user_id
                 
-                result_text = "WIN" if user_wins > opponent_wins else "LOSS"
-                rating_change = rating_after - rating_before
+                opponent_name = get_attr(opponent_data, 'user_name', 'Unknown') if opponent_data else 'Unknown'
                 
-                matches.append({
-                    'match_date': row[0],
-                    'opponent_name': opponent_name,
-                    'result': result_text,
-                    'rating_change': rating_change,
-                    'rating_before': rating_before,
-                    'rating_after': rating_after,
-                    'user_class': user_class,
-                    'opponent_class': opponent_class
-                })
+                # 試合結果の表示
+                result_emoji = "🔵" if user_won else "🔴"
+                result_text = "勝利" if user_won else "敗北"
+                rating_change_str = f"{user_rating_change:+.0f}" if user_rating_change != 0 else "±0"
+                
+                # 使用クラス情報を取得（新しいデータベース構造対応）
+                if match['user1_id'] == user_id:
+                    user_class = match.get('user1_selected_class', 'Unknown')
+                else:
+                    user_class = match.get('user2_selected_class', 'Unknown')
+                
+                field_value = (
+                    f"vs {opponent_name}\n"
+                    f"結果: {result_text}\n"
+                    f"使用クラス: {user_class}\n"
+                    f"レート変動: {rating_change_str}\n"
+                    f"試合後レート: {after_rating:.0f}"
+                )
+                
+                # 日付のフォーマット
+                match_date = match['match_date'][:16] if match['match_date'] else 'Unknown'
+                
+                current_embed.add_field(
+                    name=f"{result_emoji} {match_date}",
+                    value=field_value,
+                    inline=False
+                )
             
-            return matches
+            # 最初のEmbedを送信
+            if embeds:
+                message = await interaction.followup.send(embed=embeds[0], ephemeral=True)
+                
+                # 複数ページがある場合はページネーションを追加
+                if len(embeds) > 1:
+                    view = MatchHistoryPaginatorView(embeds)
+                    await message.edit(view=view)
             
         except Exception as e:
-            self.logger.error(f"Error getting last {limit} matches (legacy) for {discord_id}: {e}")
-            return []
+            self.logger.error(f"Error displaying last 50 matches: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            await interaction.followup.send("戦績の取得中にエラーが発生しました。", ephemeral=True)
+
+class MatchHistoryPaginatorView(View):
+    """試合履歴のページネーションView"""
     
-    def close_session(self):
-        """セッションを閉じる"""
+    def __init__(self, embeds: List[discord.Embed]):
+        super().__init__(timeout=600)
+        self.embeds = embeds
+        self.current = 0
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    @discord.ui.button(label="前へ", style=discord.ButtonStyle.primary)
+    async def previous(self, button: Button, interaction: discord.Interaction):
+        """前のページへ"""
+        if self.current > 0:
+            self.current -= 1
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+        else:
+            await interaction.response.defer()
+    
+    @discord.ui.button(label="次へ", style=discord.ButtonStyle.primary)
+    async def next(self, button: Button, interaction: discord.Interaction):
+        """次のページへ"""
+        if self.current < len(self.embeds) - 1:
+            self.current += 1
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+        else:
+            await interaction.response.defer()
+    
+    async def on_timeout(self):
+        """タイムアウト時の処理"""
         try:
-            self.session.close()
+            # ボタンを無効化
+            for item in self.children:
+                item.disabled = True
         except Exception as e:
-            self.logger.error(f"Error closing session: {e}")
+            self.logger.error(f"Error in on_timeout: {e}")
+
+class UserStatsDisplayView(View):
+    """ユーザー統計表示View"""
     
-    def __del__(self):
-        """デストラクタでセッションを閉じる"""
-        self.close_session()
+    def __init__(self, user_data: dict, stats_data: dict):
+        super().__init__(timeout=300)
+        self.user_data = user_data
+        self.stats_data = stats_data
+    
+    @discord.ui.button(label="詳細統計", style=discord.ButtonStyle.secondary)
+    async def detailed_stats(self, button: Button, interaction: discord.Interaction):
+        """詳細統計を表示"""
+        embed = discord.Embed(
+            title=f"{self.user_data['user_name']} の詳細統計",
+            color=discord.Color.blue()
+        )
+        
+        # 詳細な統計情報をEmbedに追加
+        embed.add_field(
+            name="基本情報",
+            value=f"レート: {self.stats_data.get('rating', 'N/A')}\n"
+                  f"順位: {self.stats_data.get('rank', 'N/A')}\n"
+                  f"勝率: {self.stats_data.get('win_rate', 'N/A')}%",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="試合統計",
+            value=f"総試合数: {self.stats_data.get('total_matches', 0)}\n"
+                  f"勝利数: {self.stats_data.get('win_count', 0)}\n"
+                  f"敗北数: {self.stats_data.get('loss_count', 0)}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="連勝記録",
+            value=f"現在の連勝: {self.stats_data.get('current_streak', 0)}\n"
+                  f"最大連勝: {self.stats_data.get('max_streak', 0)}",
+            inline=True
+        )
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    @discord.ui.button(label="クラス別統計", style=discord.ButtonStyle.secondary)
+    async def class_stats(self, button: Button, interaction: discord.Interaction):
+        """クラス別統計を表示"""
+        # クラス別統計の実装（必要に応じて）
+        await interaction.response.send_message(
+            "クラス別統計は実装予定です。", 
+            ephemeral=True
+        )

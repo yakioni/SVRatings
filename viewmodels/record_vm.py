@@ -49,10 +49,28 @@ class RecordViewModel:
             await self._delete_message_after_delay(message, 10)
             return
         
-        # user_season_recordから全シーズンの勝敗数を集計
-        records = self.season_model.get_user_all_season_records(user['id'])
-        total_win_count = sum(record.win_count for record in records)
-        total_loss_count = sum(record.loss_count for record in records)
+        # user_season_recordから全シーズンの勝敗数を集計（セッション管理対応）
+        def _get_all_season_records(session):
+            from config.database import UserSeasonRecord
+            records = session.query(UserSeasonRecord).filter_by(
+                user_id=user['id']
+            ).all()
+            
+            return [
+                {
+                    'win_count': record.win_count,
+                    'loss_count': record.loss_count,
+                    'total_matches': record.total_matches
+                }
+                for record in records
+            ]
+        
+        records_data = self.season_model.safe_execute(_get_all_season_records)
+        if not records_data:
+            records_data = []
+        
+        total_win_count = sum(record['win_count'] for record in records_data)
+        total_loss_count = sum(record['loss_count'] for record in records_data)
         total_count = total_win_count + total_loss_count
         win_rate = (total_win_count / total_count) * 100 if total_count > 0 else 0
         
@@ -94,16 +112,32 @@ class RecordViewModel:
             final_rating = user['rating']
             rank = self.user_model.get_user_rank(str(user_id))
         else:
-            # 過去シーズンの場合、UserSeasonRecordからデータを取得
-            past_record = self.season_model.get_user_season_record(user['id'], season_id)
+            # 過去シーズンの場合、UserSeasonRecordからデータを取得（セッション管理対応）
+            def _get_past_record(session):
+                from config.database import UserSeasonRecord
+                record = session.query(UserSeasonRecord).filter_by(
+                    user_id=user['id'], season_id=season_id
+                ).first()
+                
+                if record:
+                    return {
+                        'rating': record.rating,
+                        'rank': record.rank,
+                        'win_count': record.win_count,
+                        'loss_count': record.loss_count,
+                        'total_matches': record.total_matches
+                    }
+                return None
+            
+            past_record = self.season_model.safe_execute(_get_past_record)
             if not past_record:
                 await interaction.followup.send("過去シーズンのレコードが見つかりません。", ephemeral=True)
                 return
             
-            final_rating = past_record.rating
-            rank = past_record.rank
-            win_count = past_record.win_count
-            loss_count = past_record.loss_count
+            final_rating = past_record['rating']
+            rank = past_record['rank']
+            win_count = past_record['win_count']
+            loss_count = past_record['loss_count']
             total_count = win_count + loss_count
             win_rate = (win_count / total_count) * 100 if total_count > 0 else 0
         

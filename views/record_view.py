@@ -102,10 +102,14 @@ class PastSeasonRecordView(View):
                 season_model = SeasonModel()
                 user_record = season_model.get_user_season_record(user['id'], selected_season_id)
                 
-                if not user_record:
+                # user_recordが存在するかどうかのみチェック（属性にはアクセスしない）
+                if user_record is None:
                     message = await select_interaction.followup.send("未参加です。", ephemeral=True)
                     await asyncio.sleep(10)
-                    await message.delete()
+                    try:
+                        await message.delete()
+                    except discord.errors.NotFound:
+                        pass
                     return
                 
                 # ユーザーがシーズンに参加している場合、クラスを選択させる
@@ -207,15 +211,42 @@ class Last50RecordButton(Button):
         try:
             await interaction.response.defer(ephemeral=True)
             
-            # RecordModelを使用して直近50戦のデータを取得
-            from models.record import RecordModel
-            record_model = RecordModel()
+            # MatchModelを使用して直近50戦のデータを取得
+            from models.match import MatchModel
+            from models.user import UserModel
             
-            user_id = str(interaction.user.id)
-            matches = record_model.get_user_last_n_matches(user_id, 50)
+            user_model = UserModel()
+            match_model = MatchModel()
             
-            if not matches:
-                await interaction.followup.send("試合履歴が見つかりません。", ephemeral=True)
+            # ユーザー情報を取得
+            user_data = user_model.get_user_by_discord_id(str(interaction.user.id))
+            if not user_data:
+                await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
+                return
+            
+            # user_dataが辞書かオブジェクトかを判定して適切にアクセス
+            def get_attr(data, attr_name, default=None):
+                if isinstance(data, dict):
+                    return data.get(attr_name, default)
+                else:
+                    return getattr(data, attr_name, default)
+            
+            user_id = get_attr(user_data, 'id')
+            user_name = get_attr(user_data, 'user_name')
+            
+            # 試合履歴を取得（50戦のみ）
+            matches = match_model.get_user_match_history(user_id, 50)
+            
+            # 完了した試合のみフィルタリング
+            completed_matches = []
+            for match in matches:
+                if (match.get('winner_user_id') is not None and 
+                    match.get('after_user1_rating') is not None and 
+                    match.get('after_user2_rating') is not None):
+                    completed_matches.append(match)
+            
+            if not completed_matches:
+                await interaction.followup.send("完了した試合履歴が見つかりません。", ephemeral=True)
                 return
             
             # Embedを作成して試合履歴を表示
@@ -223,28 +254,71 @@ class Last50RecordButton(Button):
             current_embed = None
             matches_per_embed = 10
             
-            for i, match in enumerate(matches):
+            for i, match in enumerate(completed_matches):
                 # 10試合ごとに新しいEmbedを作成
                 if i % matches_per_embed == 0:
                     current_embed = discord.Embed(
-                        title=f"直近50戦の戦績 (Page {i//matches_per_embed + 1})",
+                        title=f"{user_name} の直近50戦 (Page {i//matches_per_embed + 1})",
                         color=discord.Color.blue()
                     )
                     embeds.append(current_embed)
                 
+                # 対戦相手名を取得
+                if match['user1_id'] == user_id:
+                    opponent_data = user_model.get_user_by_id(match['user2_id'])
+                    user_rating_change = match.get('user1_rating_change', 0)
+                    after_rating = match.get('after_user1_rating')
+                    before_rating = match.get('before_user1_rating')
+                    user_won = match['winner_user_id'] == user_id
+                else:
+                    opponent_data = user_model.get_user_by_id(match['user1_id'])
+                    user_rating_change = match.get('user2_rating_change', 0)
+                    after_rating = match.get('after_user2_rating')
+                    before_rating = match.get('before_user2_rating')
+                    user_won = match['winner_user_id'] == user_id
+                
+                opponent_name = get_attr(opponent_data, 'user_name', 'Unknown') if opponent_data else 'Unknown'
+                
+                # None値チェックとデフォルト値設定
+                if user_rating_change is None:
+                    user_rating_change = 0
+                if after_rating is None:
+                    after_rating = 0
+                if before_rating is None:
+                    before_rating = 0
+                
                 # 試合結果の表示
-                result_emoji = "🔴" if match['result'] == "LOSS" else "🔵"
-                rating_change_str = f"{match['rating_change']:+.0f}" if match['rating_change'] != 0 else "±0"
+                result_emoji = "🔵" if user_won else "🔴"
+                result_text = "勝利" if user_won else "敗北"
+                rating_change_str = f"{user_rating_change:+.0f}" if user_rating_change != 0 else "±0"
+                
+                # 使用クラス情報を取得（新しいデータベース構造対応）
+                if match['user1_id'] == user_id:
+                    user_class = match.get('user1_selected_class', 'Unknown')
+                else:
+                    user_class = match.get('user2_selected_class', 'Unknown')
+                
+                # Noneや空文字列の場合はUnknownに設定
+                if not user_class:
+                    user_class = 'Unknown'
                 
                 field_value = (
-                    f"vs {match['opponent_name']}\n"
-                    f"結果: {match['user_wins']}-{match['opponent_wins']} ({match['result']})\n"
+                    f"vs {opponent_name}\n"
+                    f"結果: {result_text}\n"
+                    f"使用クラス: {user_class}\n"
                     f"レート変動: {rating_change_str}\n"
-                    f"試合後レート: {match['rating_after']:.0f}"
+                    f"試合後レート: {after_rating:.0f}"
                 )
                 
+                # 日付のフォーマット
+                match_date = match.get('match_date', '')
+                if match_date:
+                    match_date = match_date[:16]
+                else:
+                    match_date = 'Unknown'
+                
                 current_embed.add_field(
-                    name=f"{result_emoji} {match['match_date'][:16]}",
+                    name=f"{result_emoji} {match_date}",
                     value=field_value,
                     inline=False
                 )
@@ -260,6 +334,8 @@ class Last50RecordButton(Button):
             
         except Exception as e:
             self.logger.error(f"Error displaying last 50 matches: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             await interaction.followup.send("戦績の取得中にエラーが発生しました。", ephemeral=True)
 
 class MatchHistoryPaginatorView(View):
