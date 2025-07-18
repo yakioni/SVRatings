@@ -195,6 +195,176 @@ class RecordViewModel:
         )
         await self._delete_message_after_delay(message, 300)
     
+    async def show_detailed_class_stats(self, interaction: discord.Interaction, user_id: int, 
+                                      selected_classes: List[str], season_id: Optional[int] = None):
+        """詳細なクラス戦績を表示（user_class、selected_classを考慮）"""
+        user = self.user_model.get_user_by_discord_id(str(user_id))
+        if not user:
+            message = await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
+            await self._delete_message_after_delay(message, 300)
+            return
+        
+        # シーズン名を取得
+        season_name = None
+        if season_id is not None:
+            season_data = self.season_model.get_season_by_id(season_id)
+            season_name = season_data['season_name'] if season_data else None
+        
+        # 詳細戦績の取得
+        matches = self._get_detailed_class_matches(user['id'], selected_classes, season_name)
+        
+        # 勝敗数の計算
+        win_count = sum(1 for match in matches if match['winner_user_id'] == user['id'])
+        total_count = len(matches)
+        loss_count = total_count - win_count
+        win_rate = (win_count / total_count) * 100 if total_count > 0 else 0
+        
+        # クラス表示文字列を作成
+        if len(selected_classes) == 1:
+            selected_class_str = f"{selected_classes[0]}（選択クラス基準）"
+        elif len(selected_classes) == 2:
+            selected_class_str = f"{selected_classes[0]} + {selected_classes[1]}（登録クラス基準）"
+        else:
+            selected_class_str = "複数クラス"
+        
+        # シーズン情報を表示に含める
+        season_info = f"シーズン {season_name}" if season_name else "全シーズン"
+        
+        # 詳細戦績メッセージ
+        detailed_message = (
+            f"**{user['user_name']} の詳細戦績**\n"
+            f"対象: {season_info}\n"
+            f"クラス: {selected_class_str}\n"
+            f"勝率: {win_rate:.2f}%\n"
+            f"{total_count}戦   {win_count}勝-{loss_count}敗"
+        )
+        
+        # 最近の試合履歴も表示（最大10試合）
+        if matches:
+            detailed_message += "\n\n**最近の試合履歴（最大10戦）:**"
+            recent_matches = matches[:10]  # 最新10試合
+            
+            for i, match in enumerate(recent_matches, 1):
+                # 対戦相手名を取得
+                if match['user1_id'] == user['id']:
+                    opponent_data = self.user_model.get_user_by_id(match['user2_id'])
+                    user_won = match['winner_user_id'] == user['id']
+                    user_selected_class = match.get('user1_selected_class', 'Unknown')
+                else:
+                    opponent_data = self.user_model.get_user_by_id(match['user1_id'])
+                    user_won = match['winner_user_id'] == user['id']
+                    user_selected_class = match.get('user2_selected_class', 'Unknown')
+                
+                # user_dataが辞書かオブジェクトかを判定して適切にアクセス
+                def get_attr(data, attr_name, default=None):
+                    if isinstance(data, dict):
+                        return data.get(attr_name, default)
+                    else:
+                        return getattr(data, attr_name, default)
+                
+                opponent_name = get_attr(opponent_data, 'user_name', 'Unknown') if opponent_data else 'Unknown'
+                
+                result_emoji = "🔵" if user_won else "🔴"
+                result_text = "勝利" if user_won else "敗北"
+                
+                match_date = match.get('match_date', '')[:10] if match.get('match_date') else 'Unknown'
+                
+                detailed_message += f"\n{i}. {result_emoji} vs {opponent_name} ({user_selected_class}) - {result_text} ({match_date})"
+        
+        message = await interaction.followup.send(detailed_message, ephemeral=True)
+        await self._delete_message_after_delay(message, 300)
+    
+    def _get_detailed_class_matches(self, user_id: int, selected_classes: List[str], 
+                                   season_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """詳細なクラス戦績を取得（user_class、selected_classを考慮）"""
+        def _get_matches(session):
+            from config.database import MatchHistory
+            from sqlalchemy import or_, and_
+            
+            # ベースクエリ
+            query = session.query(MatchHistory).filter(
+                or_(
+                    MatchHistory.user1_id == user_id,
+                    MatchHistory.user2_id == user_id
+                )
+            )
+            
+            # シーズンフィルター
+            if season_name:
+                query = query.filter(MatchHistory.season_name == season_name)
+            
+            # クラスフィルター
+            if len(selected_classes) == 1:
+                # 1つのクラスを選択：selected_classがそのクラスの試合
+                class_name = selected_classes[0]
+                query = query.filter(
+                    or_(
+                        and_(MatchHistory.user1_id == user_id,
+                             MatchHistory.user1_selected_class == class_name),
+                        and_(MatchHistory.user2_id == user_id,
+                             MatchHistory.user2_selected_class == class_name)
+                    )
+                )
+            elif len(selected_classes) == 2:
+                # 2つのクラスを選択：class_a/class_bがその組み合わせの試合
+                class1, class2 = selected_classes
+                query = query.filter(
+                    or_(
+                        and_(MatchHistory.user1_id == user_id,
+                             or_(
+                                 and_(MatchHistory.user1_class_a == class1,
+                                      MatchHistory.user1_class_b == class2),
+                                 and_(MatchHistory.user1_class_a == class2,
+                                      MatchHistory.user1_class_b == class1)
+                             )),
+                        and_(MatchHistory.user2_id == user_id,
+                             or_(
+                                 and_(MatchHistory.user2_class_a == class1,
+                                      MatchHistory.user2_class_b == class2),
+                                 and_(MatchHistory.user2_class_a == class2,
+                                      MatchHistory.user2_class_b == class1)
+                             ))
+                    )
+                )
+            
+            # 完了した試合のみ取得
+            query = query.filter(MatchHistory.winner_user_id.isnot(None))
+            
+            # 日付の降順でソート
+            query = query.order_by(MatchHistory.match_date.desc())
+            
+            matches = query.all()
+            
+            # セッション内で辞書に変換
+            return [
+                {
+                    'id': match.id,
+                    'user1_id': match.user1_id,
+                    'user2_id': match.user2_id,
+                    'match_date': match.match_date,
+                    'season_name': match.season_name,
+                    'user1_class_a': match.user1_class_a,
+                    'user1_class_b': match.user1_class_b,
+                    'user2_class_a': match.user2_class_a,
+                    'user2_class_b': match.user2_class_b,
+                    'user1_rating_change': match.user1_rating_change,
+                    'user2_rating_change': match.user2_rating_change,
+                    'winner_user_id': match.winner_user_id,
+                    'loser_user_id': match.loser_user_id,
+                    'before_user1_rating': match.before_user1_rating,
+                    'before_user2_rating': match.before_user2_rating,
+                    'after_user1_rating': match.after_user1_rating,
+                    'after_user2_rating': match.after_user2_rating,
+                    'user1_stay_flag': match.user1_stay_flag,
+                    'user2_stay_flag': match.user2_stay_flag,
+                    'user1_selected_class': getattr(match, 'user1_selected_class', None),
+                    'user2_selected_class': getattr(match, 'user2_selected_class', None)
+                }
+                for match in matches
+            ]
+        
+        return self.match_model.safe_execute(_get_matches) or []
+    
     def totalize_season(self, season_id: int) -> Dict[str, Any]:
         """シーズン終了時に全ユーザーのシーズン統計を保存"""
         return self.season_model.finalize_season(season_id)

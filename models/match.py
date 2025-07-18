@@ -250,15 +250,22 @@ class MatchModel(BaseModel):
         session.add(new_match)
         return new_match
     
+
     def get_user_match_history(self, user_id: int, limit: int = 50) -> List[Dict[str, Any]]:
         """ユーザーの試合履歴を取得（辞書形式で返す）"""
         def _get_history(session: Session):
-            matches = session.query(self.MatchHistory).filter(
+            query = session.query(self.MatchHistory).filter(
                 or_(
                     self.MatchHistory.user1_id == user_id,
                     self.MatchHistory.user2_id == user_id
                 )
-            ).order_by(desc(self.MatchHistory.match_date)).limit(limit).all()
+            ).order_by(desc(self.MatchHistory.match_date))
+            
+            # limitがNoneの場合は全履歴を取得
+            if limit is not None:
+                query = query.limit(limit)
+            
+            matches = query.all()
             
             # セッション内で辞書に変換
             return [self._match_to_dict(match) for match in matches]

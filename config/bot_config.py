@@ -6,14 +6,14 @@ from config.settings import (
     BOT_TOKEN_1, BOT_TOKEN_2, validate_config,
     BATTLE_CHANNEL_ID, BATTLE_GUIDE_TEXT,
     WELCOME_CHANNEL_ID, PROFILE_CHANNEL_ID, RANKING_CHANNEL_ID,
-    PAST_RANKING_CHANNEL_ID, RECORD_CHANNEL_ID, PAST_RECORD_CHANNEL_ID,
+    PAST_RANKING_CHANNEL_ID, RATING_UPDATE_CHANNEL_ID, RECORD_CHANNEL_ID, PAST_RECORD_CHANNEL_ID,
     LAST_50_MATCHES_RECORD_CHANNEL_ID, MATCHING_CHANNEL_ID,
     COMMAND_CHANNEL_ID
 )
 from viewmodels.matchmaking_vm import MatchmakingViewModel, ResultViewModel, CancelViewModel
 from viewmodels.ranking_vm import RankingViewModel
 from views.matchmaking_view import MatchmakingView, ClassSelectView, ResultView, RateDisplayView
-from views.ranking_view import RankingView, PastRankingButtonView
+from views.ranking_view import RankingView, RankingUpdateView, PastRankingButtonView
 from views.user_view import RegisterView, ProfileView, AchievementButtonView
 from views.record_view import CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView
 from models.base import db_manager
@@ -582,7 +582,6 @@ def create_bot_1():
         except ValueError as e:
             await ctx.send(f"エラー: {e}")
     
-    
     @bot.command()
     @commands.has_permissions(administrator=True)
     async def end_season(ctx):
@@ -750,6 +749,30 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
             await safe_purge_channel(past_ranking_channel)
             await safe_send_message(past_ranking_channel, "今作の過去ランキングを表示します。", view=PastRankingButtonView(ranking_vm))
             logging.info("✅ Past ranking channel setup completed")
+        
+        # レーティング手動更新チャンネル（詳細戦績機能も追加）
+        rating_update_channel = bot.get_channel(RATING_UPDATE_CHANNEL_ID)
+        if rating_update_channel:
+            await safe_purge_channel(rating_update_channel)
+            await safe_send_message(
+                rating_update_channel, 
+                "下のボタンを押すと、現在のレーティングランキングを手動で取得できます。",
+                view=RankingUpdateView(ranking_vm)
+            )
+            # 詳細戦績ボタンも追加
+            from views.record_view import DetailedRecordView, DetailedMatchHistoryView
+            await safe_send_message(
+                rating_update_channel,
+                "下のボタンから詳細な戦績を確認できます。",
+                view=DetailedRecordView()
+            )
+            # 詳細な全対戦履歴ボタンも追加
+            await safe_send_message(
+                rating_update_channel,
+                "下のボタンから詳細な全対戦履歴を確認できます。",
+                view=DetailedMatchHistoryView()
+            )
+            logging.info("✅ Rating update channel setup completed")
         
         # 戦績チャンネル
         record_channel = bot.get_channel(RECORD_CHANNEL_ID)
