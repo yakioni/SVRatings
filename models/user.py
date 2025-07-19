@@ -53,6 +53,10 @@ class UserModel(BaseModel):
                 class2=None
             )
             
+            # 名前変更権フィールドが存在する場合のみ設定
+            if hasattr(new_user, 'name_change_available'):
+                new_user.name_change_available = True
+            
             session.add(new_user)
             session.flush()  # IDを取得するためにflush
             
@@ -82,7 +86,7 @@ class UserModel(BaseModel):
         if not user:
             return None
         
-        return {
+        result = {
             'id': user.id,
             'discord_id': user.discord_id,
             'user_name': user.user_name,
@@ -103,6 +107,75 @@ class UserModel(BaseModel):
             'class1': user.class1,
             'class2': user.class2
         }
+        
+        # 名前変更権フィールドが存在する場合のみ追加
+        if hasattr(user, 'name_change_available'):
+            result['name_change_available'] = user.name_change_available
+        else:
+            result['name_change_available'] = True  # デフォルト値
+        
+        return result
+    
+    def change_user_name(self, discord_id: str, new_name: str) -> Dict[str, Any]:
+        """ユーザー名を変更（名前変更権を消費）"""
+        def _change_name(session: Session):
+            user = session.query(self.User).filter_by(discord_id=discord_id).first()
+            if not user:
+                return {'success': False, 'message': 'ユーザーが見つかりません。'}
+            
+            # 名前変更権の確認
+            name_change_available = getattr(user, 'name_change_available', True)
+            if not name_change_available:
+                return {
+                    'success': False, 
+                    'message': '名前変更権は来月1日まで利用できません。'
+                }
+            
+            # 新しい名前の重複チェック
+            existing_user = session.query(self.User).filter(
+                and_(self.User.user_name == new_name, self.User.id != user.id)
+            ).first()
+            if existing_user:
+                return {'success': False, 'message': 'その名前は既に使用されています。'}
+            
+            # 名前を変更
+            old_name = user.user_name
+            user.user_name = new_name
+            
+            # 名前変更権を無効化
+            if hasattr(user, 'name_change_available'):
+                user.name_change_available = False
+            
+            return {
+                'success': True,
+                'message': f'名前を "{old_name}" から "{new_name}" に変更しました。',
+                'old_name': old_name,
+                'new_name': new_name
+            }
+        
+        return self.execute_with_session(_change_name)
+    
+    def reset_name_change_permissions(self) -> int:
+        """全ユーザーの名前変更権をリセット（月次実行用）"""
+        def _reset_permissions(session: Session):
+            reset_count = 0
+            
+            # 名前変更権が無効なユーザーを取得
+            if hasattr(self.User, 'name_change_available'):
+                users = session.query(self.User).filter(
+                    self.User.name_change_available == False
+                ).all()
+                
+                for user in users:
+                    user.name_change_available = True
+                    reset_count += 1
+            else:
+                # フィールドが存在しない場合はログに記録
+                self.logger.warning("name_change_available field not found in User table")
+            
+            return reset_count
+        
+        return self.execute_with_session(_reset_permissions)
     
     def update_user_classes(self, discord_id: str, class1: str, class2: str) -> bool:
         """ユーザーのクラスを更新"""

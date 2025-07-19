@@ -1,5 +1,5 @@
 import discord
-from discord.ui import View, Button, Select
+from discord.ui import View, Button, Select, Modal, InputText
 import asyncio
 from typing import Optional
 from collections import defaultdict
@@ -60,7 +60,7 @@ class RegisterButton(Button):
             
             # ユーザーにゲーム内の名前の入力を求める
             while True:
-                await thread.send("ゲーム内で使用している名前を入力してください。名前は変更できないので注意してください。")
+                await thread.send("ゲーム内で使用している名前を入力してください。名前は後で1回だけ変更可能です。")
                 
                 def check(m):
                     return m.author == interaction.user and m.channel == thread
@@ -84,16 +84,16 @@ class RegisterButton(Button):
                     await self._safe_delete_thread(thread)
                     return
             
-            # SHADOWVERSE_IDの入力を求める
+            # SHADOWVERSE_IDの入力を求める（13桁に変更）
             shadowverse_id = None
             while not shadowverse_id:
-                await thread.send("SHADOWVERSE_ID（9桁の数字）を入力してください：")
+                await thread.send("SHADOWVERSE_ID（13桁の数字）を入力してください：")
                 
                 try:
                     msg = await interaction.client.wait_for('message', check=check, timeout=180.0)
                     input_id = msg.content
-                    if not input_id.isdigit() or len(input_id) != 9:
-                        await thread.send("入力に不備があります。9桁の数字であることを確認し、やり直してください。")
+                    if not input_id.isdigit() or len(input_id) != 13:
+                        await thread.send("入力に不備があります。13桁の数字であることを確認し、やり直してください。")
                         continue
                     shadowverse_id = input_id
                 except asyncio.TimeoutError:
@@ -105,7 +105,12 @@ class RegisterButton(Button):
             user = user_model.create_user(str(user_id), username, shadowverse_id)
             
             if user:
-                await thread.send(f"**ユーザー {username} の登録が完了しました。**")
+                await thread.send(
+                    f"**ユーザー {username} の登録が完了しました。**\n\n"
+                    f"📝 名前変更権: 1回利用可能\n"
+                    f"💡 名前変更は `/change_name` コマンドで行えます。\n"
+                    f"⚠️ 権限は使用後、毎月1日に復活します。"
+                )
                 self.logger.info(f"User {username} (ID: {user_id}) registered successfully")
             else:
                 await thread.send("登録に失敗しました。管理者にお問い合わせください。")
@@ -157,6 +162,75 @@ class RegisterButton(Button):
             # その他のエラー
             self.logger.error(f"Error deleting thread {thread.id}: {e}")
 
+class NameChangeModal(Modal):
+    """名前変更用のモーダル"""
+    
+    def __init__(self):
+        super().__init__(title="名前変更")
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        self.name_input = InputText(
+            label="新しい名前",
+            placeholder="12文字以内で入力してください",
+            max_length=12,
+            required=True
+        )
+        self.add_item(self.name_input)
+    
+    async def callback(self, interaction: discord.Interaction):
+        """名前変更の処理"""
+        new_name = self.name_input.value.strip()
+        
+        if not new_name:
+            await interaction.response.send_message("名前が入力されていません。", ephemeral=True)
+            return
+        
+        if count_characters(new_name) > 12:
+            await interaction.response.send_message("名前は12文字以内にしてください。", ephemeral=True)
+            return
+        
+        try:
+            from models.user import UserModel
+            user_model = UserModel()
+            
+            # 名前変更を実行
+            result = user_model.change_user_name(str(interaction.user.id), new_name)
+            
+            if result['success']:
+                # サーバーニックネームを変更
+                try:
+                    await interaction.user.edit(nick=new_name)
+                    await interaction.response.send_message(
+                        f"✅ 名前を **{new_name}** に変更しました。\n"
+                        f"名前変更権を使用したため、次回は来月1日から利用可能です。",
+                        ephemeral=True
+                    )
+                    self.logger.info(f"User {interaction.user.id} changed name to {new_name}")
+                except discord.Forbidden:
+                    await interaction.response.send_message(
+                        f"✅ データベースの名前を **{new_name}** に変更しました。\n"
+                        f"⚠️ サーバーニックネームの変更に失敗しました（権限不足）。\n"
+                        f"名前変更権を使用したため、次回は来月1日から利用可能です。",
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    self.logger.error(f"Error changing nickname for user {interaction.user.id}: {e}")
+                    await interaction.response.send_message(
+                        f"✅ データベースの名前を **{new_name}** に変更しました。\n"
+                        f"⚠️ サーバーニックネームの変更でエラーが発生しました。\n"
+                        f"名前変更権を使用したため、次回は来月1日から利用可能です。",
+                        ephemeral=True
+                    )
+            else:
+                await interaction.response.send_message(f"❌ {result['message']}", ephemeral=True)
+                
+        except Exception as e:
+            self.logger.error(f"Error in name change for user {interaction.user.id}: {e}")
+            await interaction.response.send_message(
+                "名前変更中にエラーが発生しました。管理者にお問い合わせください。",
+                ephemeral=True
+            )
+
 class ProfileView(View):
     """プロフィール表示View"""
     
@@ -199,6 +273,9 @@ class ProfileButton(Button):
                 if rank is None:
                     rank = "未参加です"
                 
+                # 名前変更権の状態
+                name_change_status = "✅ 利用可能" if user_instance.get('name_change_available', True) else "❌ 使用済み（来月1日復活）"
+                
                 # プロフィールメッセージの作成
                 profile_message = (
                     f"**ユーザープロフィール**\n"
@@ -216,6 +293,7 @@ class ProfileButton(Button):
                     f"信用ポイント : {trust_points}\n"
                     f"勝敗 : {win_count}勝 {loss_count}敗\n"
                     f"順位 : {rank}\n"
+                    f"名前変更権 : {name_change_status}\n"
                 )
                 
                 # StayButtonViewを作成

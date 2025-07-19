@@ -2,19 +2,20 @@ import discord
 from discord.ext import commands, tasks
 import asyncio
 import logging
+from datetime import datetime
 from config.settings import (
     BOT_TOKEN_1, BOT_TOKEN_2, validate_config,
     BATTLE_CHANNEL_ID, BATTLE_GUIDE_TEXT,
     WELCOME_CHANNEL_ID, PROFILE_CHANNEL_ID, RANKING_CHANNEL_ID,
     PAST_RANKING_CHANNEL_ID, RATING_UPDATE_CHANNEL_ID, RECORD_CHANNEL_ID, PAST_RECORD_CHANNEL_ID,
     LAST_50_MATCHES_RECORD_CHANNEL_ID, MATCHING_CHANNEL_ID,
-    COMMAND_CHANNEL_ID
+    COMMAND_CHANNEL_ID, JST
 )
 from viewmodels.matchmaking_vm import MatchmakingViewModel, ResultViewModel, CancelViewModel
 from viewmodels.ranking_vm import RankingViewModel
 from views.matchmaking_view import MatchmakingView, ClassSelectView, ResultView, RateDisplayView
 from views.ranking_view import RankingView, RankingUpdateView, PastRankingButtonView
-from views.user_view import RegisterView, ProfileView, AchievementButtonView
+from views.user_view import RegisterView, ProfileView, AchievementButtonView, NameChangeModal
 from views.record_view import CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView
 from models.base import db_manager
 from utils.helpers import safe_purge_channel, safe_send_message
@@ -35,6 +36,28 @@ def create_bot_1():
     # グローバル変数
     active_result_views = {}
     
+    # 月次タスクの定義
+    @tasks.loop(hours=24)  # 毎日チェック
+    async def monthly_name_change_reset():
+        """毎月1日に名前変更権をリセット"""
+        try:
+            current_date = datetime.now(JST).date()
+            if current_date.day == 1:  # 毎月1日
+                from models.user import UserModel
+                user_model = UserModel()
+                
+                reset_count = user_model.reset_name_change_permissions()
+                logging.info(f"🔄 Monthly name change permissions reset: {reset_count} users affected")
+                
+                # 管理チャンネルに通知（任意）
+                command_channel = bot.get_channel(COMMAND_CHANNEL_ID)
+                if command_channel:
+                    await command_channel.send(
+                        f"📅 月次処理完了: {reset_count}人のユーザーの名前変更権を復活させました。"
+                    )
+        except Exception as e:
+            logging.error(f"Error in monthly_name_change_reset: {e}")
+    
     @bot.event
     async def on_ready():
         """Bot1の起動時処理"""
@@ -52,6 +75,11 @@ def create_bot_1():
             return
         
         logging.info("✅ Database initialization completed")
+        
+        # 月次タスクの開始
+        if not monthly_name_change_reset.is_running():
+            monthly_name_change_reset.start()
+            logging.info("✅ Monthly name change reset task started")
         
         # マッチ作成コールバック関数を定義（on_ready内で定義）
         async def create_battle_thread(user1, user2):
@@ -176,8 +204,8 @@ def create_bot_1():
         user_instance = user_model.get_user_by_discord_id(str(member.id))
         if user_instance:
             try:
-                await member.edit(nick=user_instance.user_name)
-                logging.info(f"Updated nickname for user {member.id} to {user_instance.user_name}")
+                await member.edit(nick=user_instance['user_name'])
+                logging.info(f"Updated nickname for user {member.id} to {user_instance['user_name']}")
             except discord.Forbidden:
                 logging.warning(f"Failed to update nickname for user {member.id}. Permission denied.")
             except Exception as e:
@@ -230,6 +258,7 @@ def create_bot_1():
                 f"Class2: {get_attr(user_data, 'class2')}\n"
                 f"Rating: {get_attr(user_data, 'rating')}\n"
                 f"Trust Points: {get_attr(user_data, 'trust_points')}\n"
+                f"Name Change Available: {get_attr(user_data, 'name_change_available')}\n"
             )
             
             if isinstance(user_data, dict):
@@ -558,6 +587,40 @@ def create_bot_1():
             logging.error(f"Error in force_match_check: {e}")
             import traceback
             logging.error(traceback.format_exc())
+    
+    # 名前変更コマンド（新規追加）
+    @bot.slash_command(
+        name="change_name",
+        description="ユーザー名を変更します（月1回まで）"
+    )
+    async def change_name(ctx: discord.ApplicationContext):
+        """名前変更コマンド"""
+        if ctx.channel_id != COMMAND_CHANNEL_ID:
+            await ctx.respond(f"このコマンドは <#{COMMAND_CHANNEL_ID}> で実行してください。", ephemeral=True)
+            return
+        
+        try:
+            from models.user import UserModel
+            user_model = UserModel()
+            
+            # ユーザーの存在確認
+            user = user_model.get_user_by_discord_id(str(ctx.user.id))
+            if not user:
+                await ctx.respond("ユーザー登録を行ってください。", ephemeral=True)
+                return
+            
+            # 名前変更権の確認
+            if not user.get('name_change_available', True):
+                await ctx.respond("❌ 名前変更権は来月1日まで利用できません。", ephemeral=True)
+                return
+            
+            # モーダルを表示
+            modal = NameChangeModal()
+            await ctx.response.send_modal(modal)
+            
+        except Exception as e:
+            logging.error(f"Error in change_name command: {e}")
+            await ctx.respond("名前変更処理中にエラーが発生しました。", ephemeral=True)
     
     @bot.command()
     @commands.has_permissions(administrator=True)
