@@ -3,7 +3,7 @@ from discord.ui import View, Button, Select, Modal, InputText
 import asyncio
 from typing import Optional
 from collections import defaultdict
-from utils.helpers import safe_create_register_thread, safe_add_user_to_thread, count_characters
+from utils.helpers import count_characters
 import logging
 
 class RegisterView(View):
@@ -22,145 +22,129 @@ class RegisterButton(Button):
     
     async def callback(self, interaction: discord.Interaction):
         """登録ボタンのコールバック"""
-        # スレッドを作成
-        thread = await safe_create_register_thread(
-            interaction.channel, 
-            interaction.user, 
-        )
-        
-        if thread:
-            await interaction.response.defer()
-            await safe_add_user_to_thread(thread, interaction.user)
-            
-            # スレッド内で register_user の処理を行う
-            await self.register_user(interaction, thread)
-        else:
-            await interaction.response.send_message(
-                "スレッドの作成に失敗しました。しばらく待ってから再試行してください。", 
-                ephemeral=True
-            )
-    
-    async def register_user(self, interaction: discord.Interaction, thread: discord.Thread):
-        """ユーザー登録処理"""
-        username = str(interaction.user.display_name)
-        user_id = interaction.user.id
-        
         try:
             # 遅延インポートで循環インポートを回避
             from models.user import UserModel
             user_model = UserModel()
             
             # 既存ユーザーをチェック
-            existing_user = user_model.get_user_by_discord_id(str(user_id))
+            existing_user = user_model.get_user_by_discord_id(str(interaction.user.id))
             if existing_user and existing_user['discord_id'] and existing_user['trust_points']:
-                await thread.send("あなたはすでに登録されています。")
-                await asyncio.sleep(8)
-                await self._safe_delete_thread(thread)
+                await interaction.response.send_message("あなたはすでに登録されています。", ephemeral=True)
                 return
             
-            # ユーザーにゲーム内の名前の入力を求める
-            while True:
-                await thread.send("ゲーム内で使用している名前を入力してください。名前は後で1回だけ変更可能です。")
-                
-                def check(m):
-                    return m.author == interaction.user and m.channel == thread
-                
-                try:
-                    msg = await interaction.client.wait_for('message', check=check, timeout=180.0)
-                    username = msg.content
-                    
-                    # ニックネームの長さを確認（12文字以内）
-                    if count_characters(username) > 12:
-                        await thread.send("ニックネームは12文字以内にしてください（全角・半角問わず）。")
-                        continue
-                    
-                    if not username:
-                        await thread.send("無効な入力です。再度ゲーム内の名前を入力してください。")
-                        continue
-                    
-                    break
-                except asyncio.TimeoutError:
-                    await thread.send("タイムアウトしました。もう一度お試しください。")
-                    await self._safe_delete_thread(thread)
-                    return
+            # モーダルを表示
+            modal = UserRegistrationModal()
+            await interaction.response.send_modal(modal)
             
-            # SHADOWVERSE_IDの入力を求める（13桁に変更）
-            shadowverse_id = None
-            while not shadowverse_id:
-                await thread.send("SHADOWVERSE_ID（13桁の数字）を入力してください：")
-                
-                try:
-                    msg = await interaction.client.wait_for('message', check=check, timeout=180.0)
-                    input_id = msg.content
-                    if not input_id.isdigit() or len(input_id) != 13:
-                        await thread.send("入力に不備があります。13桁の数字であることを確認し、やり直してください。")
-                        continue
-                    shadowverse_id = input_id
-                except asyncio.TimeoutError:
-                    await thread.send("登録がタイムアウトしました。もう一度お試しください。")
-                    await self._safe_delete_thread(thread)
-                    return
+        except Exception as e:
+            self.logger.error(f"Error in register button callback: {e}")
+            await interaction.response.send_message(
+                "登録処理中にエラーが発生しました。管理者にお問い合わせください。", 
+                ephemeral=True
+            )
+
+class UserRegistrationModal(Modal):
+    """ユーザー登録用のモーダル"""
+    
+    def __init__(self):
+        super().__init__(title="ユーザー登録")
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        self.username_input = InputText(
+            label="ゲーム内で使用している名前",
+            placeholder="12文字以内で入力してください（後で1回変更可能）",
+            max_length=12,
+            required=True
+        )
+        self.add_item(self.username_input)
+        
+        self.shadowverse_id_input = InputText(
+            label="SHADOWVERSE_ID",
+            placeholder="13桁の数字を入力してください",
+            min_length=13,
+            max_length=13,
+            required=True
+        )
+        self.add_item(self.shadowverse_id_input)
+    
+    async def callback(self, interaction: discord.Interaction):
+        """ユーザー登録の処理"""
+        username = self.username_input.value.strip()
+        shadowverse_id = self.shadowverse_id_input.value.strip()
+        user_id = interaction.user.id
+        
+        # 入力値検証
+        if not username:
+            await interaction.response.send_message("名前が入力されていません。", ephemeral=True)
+            return
+        
+        if count_characters(username) > 12:
+            await interaction.response.send_message("名前は12文字以内にしてください。", ephemeral=True)
+            return
+        
+        if not shadowverse_id.isdigit() or len(shadowverse_id) != 13:
+            await interaction.response.send_message(
+                "SHADOWVERSE_IDは13桁の数字である必要があります。", 
+                ephemeral=True
+            )
+            return
+        
+        try:
+            from models.user import UserModel
+            user_model = UserModel()
             
             # ユーザーを作成
             user = user_model.create_user(str(user_id), username, shadowverse_id)
             
             if user:
-                await thread.send(
-                    f"**ユーザー {username} の登録が完了しました。**\n\n"
-                    f"📝 名前変更権: 1回利用可能\n"
-                    f"💡 名前変更は `/change_name` コマンドで行えます。\n"
-                    f"⚠️ 権限は使用後、毎月1日に復活します。"
-                )
-                self.logger.info(f"User {username} (ID: {user_id}) registered successfully")
+                # サーバーニックネームを変更
+                try:
+                    await interaction.user.edit(nick=username)
+                    await interaction.response.send_message(
+                        f"✅ **ユーザー {username} の登録が完了しました。**\n\n"
+                        f"📝 名前変更権: 1回利用可能\n"
+                        f"💡 名前変更は `/change_name` コマンドで行えます。\n"
+                        f"⚠️ 権限は使用後、毎月1日に復活します。\n"
+                        f"🎮 サーバーニックネームも更新されました。",
+                        ephemeral=True
+                    )
+                except discord.Forbidden:
+                    await interaction.response.send_message(
+                        f"✅ **ユーザー {username} の登録が完了しました。**\n\n"
+                        f"📝 名前変更権: 1回利用可能\n"
+                        f"💡 名前変更は `/change_name` コマンドで行えます。\n"
+                        f"⚠️ 権限は使用後、毎月1日に復活します。\n"
+                        f"🔧 サーバーニックネームの変更に失敗しました（権限不足）。",
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    self.logger.error(f"Error changing nickname for user {user_id}: {e}")
+                    await interaction.response.send_message(
+                        f"✅ **ユーザー {username} の登録が完了しました。**\n\n"
+                        f"📝 名前変更権: 1回利用可能\n"
+                        f"💡 名前変更は `/change_name` コマンドで行えます。\n"
+                        f"⚠️ 権限は使用後、毎月1日に復活します。\n"
+                        f"🔧 サーバーニックネームの変更でエラーが発生しました。",
+                        ephemeral=True
+                    )
+                
+                self.logger.info(f"User {username} (ID: {user_id}) registered successfully via modal")
             else:
-                await thread.send("登録に失敗しました。管理者にお問い合わせください。")
+                await interaction.response.send_message(
+                    "❌ 登録に失敗しました。管理者にお問い合わせください。", 
+                    ephemeral=True
+                )
         
         except ValueError as e:
-            await thread.send(f"登録エラー: {str(e)}")
+            await interaction.response.send_message(f"❌ 登録エラー: {str(e)}", ephemeral=True)
             self.logger.error(f"Registration error for user {user_id}: {e}")
         except Exception as e:
-            await thread.send("予期しないエラーが発生しました。管理者にお問い合わせください。")
+            await interaction.response.send_message(
+                "❌ 予期しないエラーが発生しました。管理者にお問い合わせください。", 
+                ephemeral=True
+            )
             self.logger.error(f"Unexpected error during registration for user {user_id}: {e}")
-        finally:
-            await asyncio.sleep(6)
-            await self._safe_delete_thread(thread)
-    
-    async def _safe_delete_thread(self, thread: discord.Thread):
-        """スレッドを安全に削除"""
-        try:
-            # スレッドが存在するかチェック（guild.get_threadを使用）
-            guild_thread = thread.guild.get_thread(thread.id)
-            if guild_thread is None:
-                # スレッドが見つからない場合はguild.fetch_channelで確認
-                try:
-                    await thread.guild.fetch_channel(thread.id)
-                except discord.errors.NotFound:
-                    # スレッドが既に削除されている
-                    self.logger.info(f"Thread {thread.id} was already deleted")
-                    return
-            
-            # スレッドが存在する場合は削除
-            await thread.delete()
-            self.logger.info(f"Thread {thread.id} deleted successfully")
-            
-        except discord.errors.NotFound:
-            # スレッドが既に削除されている
-            self.logger.info(f"Thread {thread.id} was already deleted")
-        except discord.errors.Forbidden:
-            # 削除権限がない
-            self.logger.error(f"No permission to delete thread {thread.id}")
-        except AttributeError as e:
-            # オブジェクトの属性エラー
-            self.logger.error(f"Attribute error when deleting thread {thread.id}: {e}")
-            # 単純に削除を試行
-            try:
-                await thread.delete()
-                self.logger.info(f"Thread {thread.id} deleted successfully (fallback)")
-            except Exception as fallback_e:
-                self.logger.error(f"Fallback deletion failed for thread {thread.id}: {fallback_e}")
-        except Exception as e:
-            # その他のエラー
-            self.logger.error(f"Error deleting thread {thread.id}: {e}")
 
 class NameChangeModal(Modal):
     """名前変更用のモーダル"""
@@ -202,7 +186,8 @@ class NameChangeModal(Modal):
                     await interaction.user.edit(nick=new_name)
                     await interaction.response.send_message(
                         f"✅ 名前を **{new_name}** に変更しました。\n"
-                        f"名前変更権を使用したため、次回は来月1日から利用可能です。",
+                        f"🎮 サーバーニックネームも更新されました。\n"
+                        f"📅 名前変更権を使用したため、次回は来月1日から利用可能です。",
                         ephemeral=True
                     )
                     self.logger.info(f"User {interaction.user.id} changed name to {new_name}")
@@ -210,7 +195,7 @@ class NameChangeModal(Modal):
                     await interaction.response.send_message(
                         f"✅ データベースの名前を **{new_name}** に変更しました。\n"
                         f"⚠️ サーバーニックネームの変更に失敗しました（権限不足）。\n"
-                        f"名前変更権を使用したため、次回は来月1日から利用可能です。",
+                        f"📅 名前変更権を使用したため、次回は来月1日から利用可能です。",
                         ephemeral=True
                     )
                 except Exception as e:
@@ -218,7 +203,7 @@ class NameChangeModal(Modal):
                     await interaction.response.send_message(
                         f"✅ データベースの名前を **{new_name}** に変更しました。\n"
                         f"⚠️ サーバーニックネームの変更でエラーが発生しました。\n"
-                        f"名前変更権を使用したため、次回は来月1日から利用可能です。",
+                        f"📅 名前変更権を使用したため、次回は来月1日から利用可能です。",
                         ephemeral=True
                     )
             else:
@@ -227,7 +212,7 @@ class NameChangeModal(Modal):
         except Exception as e:
             self.logger.error(f"Error in name change for user {interaction.user.id}: {e}")
             await interaction.response.send_message(
-                "名前変更中にエラーが発生しました。管理者にお問い合わせください。",
+                "❌ 名前変更中にエラーが発生しました。管理者にお問い合わせください。",
                 ephemeral=True
             )
 
