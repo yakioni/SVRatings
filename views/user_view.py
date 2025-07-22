@@ -1,10 +1,73 @@
 import discord
 from discord.ui import View, Button, Select, Modal, InputText
 import asyncio
-from typing import Optional
+import os
+import json
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any
 from collections import defaultdict
-from utils.helpers import count_characters
+from utils.helpers import count_characters, assign_role, remove_role
 import logging
+
+# 合言葉設定ファイル
+PREMIUM_PASSWORDS_FILE = "config/premium_passwords.json"
+PREMIUM_ROLE_NAME = "premium"
+
+class PremiumPasswordManager:
+    """Premium合言葉管理クラス"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.passwords = self.load_passwords()
+    
+    def load_passwords(self) -> Dict[str, int]:
+        """合言葉を読み込み"""
+        try:
+            os.makedirs(os.path.dirname(PREMIUM_PASSWORDS_FILE), exist_ok=True)
+            
+            if os.path.exists(PREMIUM_PASSWORDS_FILE):
+                with open(PREMIUM_PASSWORDS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                # デフォルト合言葉
+                default_passwords = {
+                    "premium2025": 30,  # 1か月
+                    "premiumhalf": 180  # 6か月
+                }
+                self.save_passwords(default_passwords)
+                return default_passwords
+        except Exception as e:
+            self.logger.error(f"Error loading premium passwords: {e}")
+            return {"premium2025": 30, "premiumhalf": 180}
+    
+    def save_passwords(self, passwords: Dict[str, int]):
+        """合言葉を保存"""
+        try:
+            os.makedirs(os.path.dirname(PREMIUM_PASSWORDS_FILE), exist_ok=True)
+            with open(PREMIUM_PASSWORDS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(passwords, f, ensure_ascii=False, indent=2)
+            self.passwords = passwords
+        except Exception as e:
+            self.logger.error(f"Error saving premium passwords: {e}")
+    
+    def set_password(self, days: int, password: str):
+        """合言葉を設定"""
+        # 既存の同じ日数の合言葉を削除
+        self.passwords = {k: v for k, v in self.passwords.items() if v != days}
+        # 新しい合言葉を追加
+        self.passwords[password] = days
+        self.save_passwords(self.passwords)
+    
+    def get_days_for_password(self, password: str) -> Optional[int]:
+        """合言葉から日数を取得"""
+        return self.passwords.get(password)
+    
+    def get_passwords_info(self) -> Dict[str, int]:
+        """現在の合言葉情報を取得"""
+        return self.passwords.copy()
+
+# グローバルな合言葉マネージャー
+password_manager = PremiumPasswordManager()
 
 class RegisterView(View):
     """ユーザー登録View"""
@@ -216,6 +279,153 @@ class NameChangeModal(Modal):
                 ephemeral=True
             )
 
+class PremiumModal(Modal):
+    """Premium機能解放用のモーダル"""
+    
+    def __init__(self):
+        super().__init__(title="Premium機能を解放する")
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        self.password_input = InputText(
+            label="合言葉を入力してください",
+            placeholder="Premium機能の合言葉を入力",
+            required=True
+        )
+        self.add_item(self.password_input)
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Premium機能解放の処理"""
+        password = self.password_input.value.strip()
+        user_id = str(interaction.user.id)
+        
+        # 合言葉をチェック
+        days = password_manager.get_days_for_password(password)
+        if days is None:
+            await interaction.response.send_message(
+                "❌ 合言葉が正しくありません。", 
+                ephemeral=True
+            )
+            return
+        
+        try:
+            from models.user import UserModel
+            user_model = UserModel()
+            
+            # 現在のPremium残日数を取得
+            current_days = user_model.get_premium_days(user_id)
+            
+            # 既にPremium日数がある場合の処理
+            if current_days > 0:
+                confirm_view = PremiumExtendConfirmView(days, current_days)
+                await interaction.response.send_message(
+                    f"⚠️ あなたは既にPremium機能を利用中です（残り{current_days}日）。\n"
+                    f"新しい合言葉を使用すると{days}日が追加されます。\n"
+                    f"合計で{current_days + days}日になります。続行しますか？",
+                    view=confirm_view,
+                    ephemeral=True
+                )
+                return
+            
+            # Premiumロールを取得または作成
+            premium_role = discord.utils.get(interaction.guild.roles, name=PREMIUM_ROLE_NAME)
+            if not premium_role:
+                try:
+                    premium_role = await interaction.guild.create_role(
+                        name=PREMIUM_ROLE_NAME,
+                        color=discord.Color.gold(),
+                        reason="Premium機能用ロール"
+                    )
+                    self.logger.info(f"Created premium role in guild {interaction.guild.id}")
+                except discord.Forbidden:
+                    await interaction.response.send_message(
+                        "❌ Premiumロールの作成に失敗しました。管理者にお問い合わせください。",
+                        ephemeral=True
+                    )
+                    return
+            
+            # Premium日数を追加
+            success = user_model.add_premium_days(user_id, days)
+            if not success:
+                await interaction.response.send_message(
+                    "❌ Premium機能の追加に失敗しました。", 
+                    ephemeral=True
+                )
+                return
+            
+            # ロールを付与
+            await assign_role(interaction.user, PREMIUM_ROLE_NAME)
+            
+            # 成功メッセージ
+            period_text = f"{days}日間"
+            await interaction.response.send_message(
+                f"🎉 **Premium機能が解放されました！**\n\n"
+                f"⏰ 追加期間: {period_text}\n"
+                f"📅 総残日数: {days}日\n"
+                f"✨ Premium機能をお楽しみください！",
+                ephemeral=True
+            )
+            
+            self.logger.info(f"Premium access granted to user {user_id} for {days} days")
+            
+        except Exception as e:
+            self.logger.error(f"Error in premium activation for user {user_id}: {e}")
+            await interaction.response.send_message(
+                "❌ Premium機能の解放中にエラーが発生しました。管理者にお問い合わせください。",
+                ephemeral=True
+            )
+
+class PremiumExtendConfirmView(View):
+    """Premium期間延長確認View"""
+    
+    def __init__(self, add_days: int, current_days: int):
+        super().__init__(timeout=60)
+        self.add_days = add_days
+        self.current_days = current_days
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    @discord.ui.button(label="はい", style=discord.ButtonStyle.success)
+    async def confirm(self, button: Button, interaction: discord.Interaction):
+        """確認ボタンのコールバック"""
+        try:
+            from models.user import UserModel
+            user_model = UserModel()
+            
+            user_id = str(interaction.user.id)
+            
+            # Premium日数を追加
+            success = user_model.add_premium_days(user_id, self.add_days)
+            if not success:
+                await interaction.response.edit_message(
+                    content="❌ Premium機能の追加に失敗しました。", 
+                    view=None
+                )
+                return
+            
+            total_days = self.current_days + self.add_days
+            
+            await interaction.response.edit_message(
+                content=f"✅ Premium期間を{self.add_days}日延長しました！\n"
+                        f"📅 総残日数: {total_days}日",
+                view=None
+            )
+            
+            self.logger.info(f"Premium extended for user {user_id}: +{self.add_days} days")
+            
+        except Exception as e:
+            self.logger.error(f"Error extending premium for user {interaction.user.id}: {e}")
+            await interaction.response.edit_message(
+                content="❌ Premium期間延長中にエラーが発生しました。",
+                view=None
+            )
+    
+    @discord.ui.button(label="いいえ", style=discord.ButtonStyle.danger)
+    async def cancel(self, button: Button, interaction: discord.Interaction):
+        """キャンセルボタンのコールバック"""
+        await interaction.response.edit_message(
+            content="Premium期間延長をキャンセルしました。",
+            view=None
+        )
+
 class ProfileView(View):
     """プロフィール表示View"""
     
@@ -261,6 +471,13 @@ class ProfileButton(Button):
                 # 名前変更権の状態
                 name_change_status = "✅ 利用可能" if user_instance.get('name_change_available', True) else "❌ 使用済み（来月1日復活）"
                 
+                # Premium状態の確認
+                premium_days = user_model.get_premium_days(user_id)
+                if premium_days > 0:
+                    premium_status = f"✨ Premium（残り{premium_days}日）"
+                else:
+                    premium_status = "❌ 未解放"
+                
                 # プロフィールメッセージの作成
                 profile_message = (
                     f"**ユーザープロフィール**\n"
@@ -279,16 +496,17 @@ class ProfileButton(Button):
                     f"勝敗 : {win_count}勝 {loss_count}敗\n"
                     f"順位 : {rank}\n"
                     f"名前変更権 : {name_change_status}\n"
+                    f"Premium状態 : {premium_status}\n"
                 )
                 
-                # StayButtonViewを作成
+                # StayButtonViewとPremiumButtonViewを作成
                 view = None
                 # '試合中' ロールを持っているか確認
                 ongoing_match_role = discord.utils.get(interaction.guild.roles, name='試合中')
                 is_in_match = ongoing_match_role in interaction.user.roles
                 
                 if not is_in_match:
-                    view = StayButtonView(user_instance, interaction)
+                    view = UserActionView(user_instance, interaction, premium_days > 0)
                 
                 await interaction.response.send_message(profile_message, ephemeral=True, view=view)
             else:
@@ -303,10 +521,10 @@ class ProfileButton(Button):
                 ephemeral=True
             )
 
-class StayButtonView(View):
-    """Stay機能用のView"""
+class UserActionView(View):
+    """ユーザーアクション用の統合View"""
     
-    def __init__(self, user_instance, interaction):
+    def __init__(self, user_instance, interaction, is_premium: bool):
         super().__init__()
         self.user_instance = user_instance
         
@@ -314,19 +532,62 @@ class StayButtonView(View):
         ongoing_match_role = discord.utils.get(interaction.guild.roles, name='試合中')
         is_in_match = ongoing_match_role in interaction.user.roles
         
-        # ボタンのラベルや有効・無効を分岐
+        # Stay機能ボタン
         if self.user_instance['stay_flag'] == 0 and self.user_instance['stayed_rating'] == 1500:
-            label = "stay機能を使用する"
-            disabled = is_in_match
+            stay_label = "stay機能を使用する"
+            stay_disabled = is_in_match
         elif self.user_instance['stay_flag'] == 1:
-            label = "stayを元に戻す"
-            disabled = is_in_match
+            stay_label = "stayを元に戻す"
+            stay_disabled = is_in_match
         else:
-            label = "stay機能は使用できません"
-            disabled = True
+            stay_label = "stay機能は使用できません"
+            stay_disabled = True
         
-        button = StayButton(user_instance, interaction, label, disabled)
-        self.add_item(button)
+        stay_button = StayButton(user_instance, interaction, stay_label, stay_disabled)
+        self.add_item(stay_button)
+        
+        # Premium機能ボタン
+        if is_premium:
+            premium_button = Button(
+                label="Premium機能解放済み",
+                style=discord.ButtonStyle.success,
+                disabled=False  # 追加可能なので有効
+            )
+            premium_button.callback = self.show_premium_extend_modal
+        else:
+            premium_button = PremiumButton()
+        
+        self.add_item(premium_button)
+    
+    async def show_premium_extend_modal(self, interaction: discord.Interaction):
+        """Premium期間延長モーダルを表示"""
+        modal = PremiumModal()
+        await interaction.response.send_modal(modal)
+
+class PremiumButton(Button):
+    """Premium機能解放ボタン"""
+    
+    def __init__(self):
+        super().__init__(
+            label="Premium機能を解放する", 
+            style=discord.ButtonStyle.secondary,
+            emoji="✨"
+        )
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Premium機能解放のコールバック"""
+        try:
+            # モーダルを表示
+            modal = PremiumModal()
+            await interaction.response.send_modal(modal)
+            
+        except Exception as e:
+            self.logger.error(f"Error in premium button callback: {e}")
+            await interaction.response.send_message(
+                "❌ Premium機能の処理中にエラーが発生しました。",
+                ephemeral=True
+            )
 
 class StayButton(Button):
     """Stay機能ボタン"""
@@ -678,3 +939,32 @@ class AchievementButton(Button):
             return int(achievement_name.replace('台', ''))
         except ValueError:
             return 0
+
+# Premium機能の定期チェック関数（bot_config.pyに追加する用）
+async def check_premium_expiry(bot):
+    """Premium期限をチェックしてロールを削除"""
+    try:
+        from models.user import UserModel
+        user_model = UserModel()
+        
+        # Premium期限チェックと日数減算
+        expired_users = user_model.reduce_premium_days_and_get_expired()
+        
+        for user_id in expired_users:
+            # ユーザーを取得
+            user = bot.get_user(int(user_id))
+            if user:
+                # 全ギルドでロールを削除
+                for guild in bot.guilds:
+                    member = guild.get_member(int(user_id))
+                    if member:
+                        premium_role = discord.utils.get(guild.roles, name=PREMIUM_ROLE_NAME)
+                        if premium_role and premium_role in member.roles:
+                            await remove_role(member, PREMIUM_ROLE_NAME)
+                            logging.info(f"Removed premium role from user {user_id} in guild {guild.id}")
+        
+        if expired_users:
+            logging.info(f"Premium subscription expired for {len(expired_users)} users")
+        
+    except Exception as e:
+        logging.error(f"Error in premium expiry check: {e}")

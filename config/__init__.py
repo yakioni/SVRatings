@@ -1,6 +1,3 @@
-# config/__init__.py
-"""設定関連のモジュール"""
-
 from .settings import *
 from .database import *
 

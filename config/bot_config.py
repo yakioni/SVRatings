@@ -15,7 +15,7 @@ from viewmodels.matchmaking_vm import MatchmakingViewModel, ResultViewModel, Can
 from viewmodels.ranking_vm import RankingViewModel
 from views.matchmaking_view import MatchmakingView, ClassSelectView, ResultView, RateDisplayView
 from views.ranking_view import RankingView, RankingUpdateView, PastRankingButtonView
-from views.user_view import RegisterView, ProfileView, AchievementButtonView, NameChangeModal
+from views.user_view import RegisterView, ProfileView, AchievementButtonView, NameChangeModal, check_premium_expiry, password_manager
 from views.record_view import CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView
 from models.base import db_manager
 from utils.helpers import safe_purge_channel, safe_send_message
@@ -57,6 +57,15 @@ def create_bot_1():
                     )
         except Exception as e:
             logging.error(f"Error in monthly_name_change_reset: {e}")
+
+    @tasks.loop(hours=24)
+    async def daily_premium_reduction():
+        """毎日Premium日数を1日減らして期限切れをチェック"""
+        try:
+            await check_premium_expiry(bot)
+            logging.info("🔄 Daily premium reduction completed")
+        except Exception as e:
+            logging.error(f"Error in daily_premium_reduction: {e}")
     
     @bot.event
     async def on_ready():
@@ -194,7 +203,11 @@ def create_bot_1():
         await setup_bot1_channels(bot, matchmaking_vm)
         
         logging.info("🎉 Bot1 initialization completed successfully!")
-    
+
+    if not daily_premium_reduction.is_running():
+        daily_premium_reduction.start()
+        logging.info("✅ Daily premium reduction task started")
+
     @bot.event
     async def on_member_join(member: discord.Member):
         """メンバー参加時の処理"""
@@ -675,6 +688,302 @@ def create_bot_1():
                 await ctx.send("終了するシーズンが見つかりません。")
         except ValueError as e:
             await ctx.send(f"エラー: {e}")
+        
+    @bot.slash_command(
+        name="set_premium_password_1month",
+        description="1か月用Premium合言葉を設定します（管理者専用）",
+        default_member_permissions=discord.Permissions(administrator=True)
+    )
+    @commands.has_permissions(administrator=True)
+    async def set_premium_password_1month(ctx: discord.ApplicationContext, password: str):
+        """1か月用Premium合言葉設定コマンド"""
+        if not password or len(password.strip()) == 0:
+            await ctx.respond("❌ 有効な合言葉を入力してください。", ephemeral=True)
+            return
+        
+        try:
+            password_manager.set_password(30, password.strip())
+            await ctx.respond(
+                f"✅ 1か月用Premium合言葉を「**{password.strip()}**」に設定しました。",
+                ephemeral=True
+            )
+            logging.info(f"Admin {ctx.user.id} set 1-month premium password: {password.strip()}")
+        except Exception as e:
+            logging.error(f"Error setting 1-month premium password: {e}")
+            await ctx.respond("❌ 合言葉の設定に失敗しました。", ephemeral=True)
+    
+    @bot.slash_command(
+        name="set_premium_password_6months",
+        description="6か月用Premium合言葉を設定します（管理者専用）",
+        default_member_permissions=discord.Permissions(administrator=True)
+    )
+    @commands.has_permissions(administrator=True)
+    async def set_premium_password_6months(ctx: discord.ApplicationContext, password: str):
+        """6か月用Premium合言葉設定コマンド"""
+        if not password or len(password.strip()) == 0:
+            await ctx.respond("❌ 有効な合言葉を入力してください。", ephemeral=True)
+            return
+        
+        try:
+            password_manager.set_password(180, password.strip())  # 6か月 = 180日
+            await ctx.respond(
+                f"✅ 6か月用Premium合言葉を「**{password.strip()}**」に設定しました。",
+                ephemeral=True
+            )
+            logging.info(f"Admin {ctx.user.id} set 6-month premium password: {password.strip()}")
+        except Exception as e:
+            logging.error(f"Error setting 6-month premium password: {e}")
+            await ctx.respond("❌ 合言葉の設定に失敗しました。", ephemeral=True)
+    
+    @bot.slash_command(
+        name="premium_passwords_info",
+        description="現在のPremium合言葉を確認します（管理者専用）",
+        default_member_permissions=discord.Permissions(administrator=True)
+    )
+    @commands.has_permissions(administrator=True)
+    async def premium_passwords_info(ctx: discord.ApplicationContext):
+        """Premium合言葉情報表示コマンド"""
+        try:
+            passwords_info = password_manager.get_passwords_info()
+            
+            if not passwords_info:
+                await ctx.respond("❌ 設定されている合言葉がありません。", ephemeral=True)
+                return
+            
+            info_text = "**現在のPremium合言葉一覧:**\n\n"
+            for password, days in passwords_info.items():
+                period_text = f"{days}日間"
+                if days == 30:
+                    period_text += " (1か月)"
+                elif days == 180:
+                    period_text += " (6か月)"
+                info_text += f"• 「**{password}**」→ {period_text}\n"
+            
+            await ctx.respond(info_text, ephemeral=True)
+        except Exception as e:
+            logging.error(f"Error getting premium passwords info: {e}")
+            await ctx.respond("❌ 合言葉情報の取得に失敗しました。", ephemeral=True)
+    
+    @bot.slash_command(
+        name="premium_status",
+        description="Premium機能の状態を確認します（管理者用）",
+        default_member_permissions=discord.Permissions(administrator=True)
+    )
+    @commands.has_permissions(administrator=True)
+    async def premium_status(ctx: discord.ApplicationContext, user: discord.Member = None):
+        """Premium状態確認コマンド"""
+        from models.user import UserModel
+        
+        try:
+            user_model = UserModel()
+            
+            if user:
+                # 特定ユーザーの情報
+                user_id = str(user.id)
+                premium_days = user_model.get_premium_days(user_id)
+                
+                if premium_days > 0:
+                    status_msg = (
+                        f"**{user.display_name} のPremium状態:**\n"
+                        f"✅ Premium ユーザー\n"
+                        f"📅 残り日数: {premium_days}日"
+                    )
+                else:
+                    status_msg = f"**{user.display_name} のPremium状態:**\n❌ 非Premium ユーザー"
+                
+                await ctx.respond(status_msg, ephemeral=True)
+            else:
+                # 全体統計
+                stats = user_model.get_premium_users_count()
+                
+                status_msg = (
+                    f"**Premium機能 全体統計:**\n"
+                    f"✨ 現在のPremiumユーザー: {stats['total']}人\n"
+                    f"⚠️ 1週間以内期限切れ: {stats['expiring_soon']}人\n"
+                    f"📅 1週間〜1か月: {stats['monthly']}人\n"
+                    f"🔥 1か月以上: {stats['long_term']}人"
+                )
+                
+                await ctx.respond(status_msg, ephemeral=True)
+        except Exception as e:
+            logging.error(f"Error in premium_status command: {e}")
+            await ctx.respond("❌ Premium状態の確認に失敗しました。", ephemeral=True)
+    
+    @bot.slash_command(
+        name="premium_grant",
+        description="指定ユーザーにPremium機能を付与します（管理者用）",
+        default_member_permissions=discord.Permissions(administrator=True)
+    )
+    @commands.has_permissions(administrator=True)
+    async def premium_grant(ctx: discord.ApplicationContext, user: discord.Member, days: int):
+        """Premium機能付与コマンド"""
+        from models.user import UserModel
+        from utils.helpers import assign_role
+        
+        if days <= 0 or days > 365:
+            await ctx.respond("❌ 日数は1〜365の範囲で指定してください。", ephemeral=True)
+            return
+        
+        user_id = str(user.id)
+        
+        try:
+            user_model = UserModel()
+            
+            # Premium日数を追加
+            success = user_model.add_premium_days(user_id, days)
+            if not success:
+                await ctx.respond("❌ ユーザーが見つからないか、Premium付与に失敗しました。", ephemeral=True)
+                return
+            
+            # ロールを付与
+            from views.user_view import PREMIUM_ROLE_NAME
+            await assign_role(user, PREMIUM_ROLE_NAME)
+            
+            # 新しい残日数を取得
+            total_days = user_model.get_premium_days(user_id)
+            
+            await ctx.respond(
+                f"✅ **{user.display_name}** にPremium機能を付与しました。\n"
+                f"📅 追加日数: {days}日\n"
+                f"🔢 総残日数: {total_days}日",
+                ephemeral=True
+            )
+            
+            logging.info(f"Admin granted {days} premium days to user {user_id}")
+            
+        except Exception as e:
+            logging.error(f"Error granting premium to user {user_id}: {e}")
+            await ctx.respond("❌ Premium付与中にエラーが発生しました。", ephemeral=True)
+    
+    @bot.slash_command(
+        name="premium_revoke",
+        description="指定ユーザーのPremium機能を取り消します（管理者用）",
+        default_member_permissions=discord.Permissions(administrator=True)
+    )
+    @commands.has_permissions(administrator=True)
+    async def premium_revoke(ctx: discord.ApplicationContext, user: discord.Member):
+        """Premium機能取り消しコマンド"""
+        from models.user import UserModel
+        from utils.helpers import remove_role
+        
+        user_id = str(user.id)
+        
+        try:
+            user_model = UserModel()
+            
+            premium_days = user_model.get_premium_days(user_id)
+            if premium_days <= 0:
+                await ctx.respond(f"❌ {user.display_name} はPremiumユーザーではありません。", ephemeral=True)
+                return
+            
+            # Premium日数を0に設定
+            success = user_model.set_premium_days(user_id, 0)
+            if not success:
+                await ctx.respond("❌ Premium取り消しに失敗しました。", ephemeral=True)
+                return
+            
+            # ロールを削除
+            from views.user_view import PREMIUM_ROLE_NAME
+            await remove_role(user, PREMIUM_ROLE_NAME)
+            
+            await ctx.respond(
+                f"✅ **{user.display_name}** のPremium機能を取り消しました。\n"
+                f"📅 取り消された日数: {premium_days}日",
+                ephemeral=True
+            )
+            
+            logging.info(f"Admin revoked premium from user {user_id}")
+            
+        except Exception as e:
+            logging.error(f"Error revoking premium from user {user_id}: {e}")
+            await ctx.respond("❌ Premium取り消し中にエラーが発生しました。", ephemeral=True)
+    
+    @bot.slash_command(
+        name="premium_set_days",
+        description="指定ユーザーのPremium残日数を設定します（管理者用）",
+        default_member_permissions=discord.Permissions(administrator=True)
+    )
+    @commands.has_permissions(administrator=True)
+    async def premium_set_days(ctx: discord.ApplicationContext, user: discord.Member, days: int):
+        """Premium残日数設定コマンド"""
+        from models.user import UserModel
+        from utils.helpers import assign_role, remove_role
+        
+        if days < 0 or days > 365:
+            await ctx.respond("❌ 日数は0〜365の範囲で指定してください。", ephemeral=True)
+            return
+        
+        user_id = str(user.id)
+        
+        try:
+            user_model = UserModel()
+            
+            # Premium日数を設定
+            success = user_model.set_premium_days(user_id, days)
+            if not success:
+                await ctx.respond("❌ ユーザーが見つからないか、設定に失敗しました。", ephemeral=True)
+                return
+            
+            # ロール管理
+            from views.user_view import PREMIUM_ROLE_NAME
+            if days > 0:
+                await assign_role(user, PREMIUM_ROLE_NAME)
+                status_text = "Premium機能を有効化"
+            else:
+                await remove_role(user, PREMIUM_ROLE_NAME)
+                status_text = "Premium機能を無効化"
+            
+            await ctx.respond(
+                f"✅ **{user.display_name}** の{status_text}しました。\n"
+                f"📅 残日数: {days}日",
+                ephemeral=True
+            )
+            
+            logging.info(f"Admin set premium days for user {user_id} to {days} days")
+            
+        except Exception as e:
+            logging.error(f"Error setting premium days for user {user_id}: {e}")
+            await ctx.respond("❌ Premium日数設定中にエラーが発生しました。", ephemeral=True)
+    
+    # Premium機能利用例コマンド（新規追加）
+    @bot.slash_command(
+        name="premium_feature_example",
+        description="Premium機能の例（Premium限定）"
+    )
+    async def premium_feature_example(ctx: discord.ApplicationContext):
+        """Premium機能の使用例"""
+        from models.user import UserModel
+        
+        user_id = str(ctx.user.id)
+        user_model = UserModel()
+        
+        try:
+            premium_days = user_model.get_premium_days(user_id)
+            
+            if premium_days <= 0:
+                await ctx.respond(
+                    "❌ この機能はPremiumユーザー限定です。\n"
+                    "プロフィールボタンから「Premium機能を解放する」をお試しください。",
+                    ephemeral=True
+                )
+                return
+            
+            await ctx.respond(
+                f"✨ **Premium機能の例**\n\n"
+                f"🎉 Premium機能をご利用いただき、ありがとうございます！\n"
+                f"📅 あなたのPremium残日数: {premium_days}日\n\n"
+                f"🔮 この機能では、例えば以下のようなことが可能です：\n"
+                f"• 詳細な統計情報の表示\n"
+                f"• 特別なランキング表示\n"
+                f"• 高度な戦績分析\n"
+                f"• カスタマイズ機能\n\n"
+                f"💡 実際の機能は用途に応じて実装してください。",
+                ephemeral=True
+            )
+        except Exception as e:
+            logging.error(f"Error in premium_feature_example for user {user_id}: {e}")
+            await ctx.respond("❌ Premium機能の実行中にエラーが発生しました。", ephemeral=True)
+
 
     return bot
 

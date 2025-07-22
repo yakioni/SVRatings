@@ -378,3 +378,156 @@ class UserModel(BaseModel):
             return [self._user_to_dict(user) for user in users]
         
         return self.safe_execute(_search) or []
+    
+    def get_premium_days(self, discord_id: str) -> int:
+        """ユーザーのPremium残日数を取得"""
+        def _get_premium_days(session: Session):
+            user = session.query(self.User).filter_by(discord_id=discord_id).first()
+            if user:
+                # premium_days_remainingフィールドが存在するかチェック
+                if hasattr(user, 'premium_days_remaining'):
+                    return user.premium_days_remaining or 0
+                else:
+                    # フィールドが存在しない場合は0を返す
+                    self.logger.warning(f"premium_days_remaining field not found for user {discord_id}")
+                    return 0
+            return 0
+        
+        return self.safe_execute(_get_premium_days) or 0
+        
+    def add_premium_days(self, discord_id: str, days: int) -> bool:
+        """ユーザーのPremium日数を追加"""
+        def _add_premium_days(session: Session):
+            user = session.query(self.User).filter_by(discord_id=discord_id).first()
+            if user:
+                # premium_days_remainingフィールドが存在するかチェック
+                if hasattr(user, 'premium_days_remaining'):
+                    current_days = user.premium_days_remaining or 0
+                    user.premium_days_remaining = current_days + days
+                    return True
+                else:
+                    # フィールドが存在しない場合はエラーログを出力
+                    self.logger.error(f"premium_days_remaining field not found for user {discord_id}")
+                    return False
+            return False
+        
+        return self.execute_with_session(_add_premium_days)
+
+    def set_premium_days(self, discord_id: str, days: int) -> bool:
+        """ユーザーのPremium日数を設定（管理者用）"""
+        def _set_premium_days(session: Session):
+            user = session.query(self.User).filter_by(discord_id=discord_id).first()
+            if user:
+                if hasattr(user, 'premium_days_remaining'):
+                    user.premium_days_remaining = days
+                    return True
+                else:
+                    self.logger.error(f"premium_days_remaining field not found for user {discord_id}")
+                    return False
+            return False
+        
+        return self.execute_with_session(_set_premium_days)
+
+    def reduce_premium_days_and_get_expired(self) -> List[str]:
+        """全ユーザーのPremium日数を1日減らして、期限切れユーザーのリストを返す"""
+        def _reduce_and_get_expired(session: Session):
+            expired_users = []
+            
+            # premium_days_remainingが1以上のユーザーを取得
+            if hasattr(self.User, 'premium_days_remaining'):
+                users = session.query(self.User).filter(
+                    self.User.premium_days_remaining > 0
+                ).all()
+                
+                for user in users:
+                    user.premium_days_remaining -= 1
+                    
+                    # 0になったユーザーを期限切れリストに追加
+                    if user.premium_days_remaining <= 0:
+                        expired_users.append(user.discord_id)
+                        user.premium_days_remaining = 0  # 負の値にならないように
+            else:
+                self.logger.warning("premium_days_remaining field not found in User table")
+            
+            return expired_users
+        
+        return self.execute_with_session(_reduce_and_get_expired) or []
+
+    def get_premium_users_count(self) -> Dict[str, int]:
+        """Premium機能の統計情報を取得"""
+        def _get_premium_stats(session: Session):
+            if hasattr(self.User, 'premium_days_remaining'):
+                total_premium = session.query(self.User).filter(
+                    self.User.premium_days_remaining > 0
+                ).count()
+                
+                premium_1_week = session.query(self.User).filter(
+                    self.User.premium_days_remaining.between(1, 7)
+                ).count()
+                
+                premium_1_month = session.query(self.User).filter(
+                    self.User.premium_days_remaining.between(8, 30)
+                ).count()
+                
+                premium_long_term = session.query(self.User).filter(
+                    self.User.premium_days_remaining > 30
+                ).count()
+                
+                return {
+                    'total': total_premium,
+                    'expiring_soon': premium_1_week,  # 1週間以内
+                    'monthly': premium_1_month,       # 1週間〜1か月
+                    'long_term': premium_long_term    # 1か月以上
+                }
+            else:
+                return {
+                    'total': 0,
+                    'expiring_soon': 0,
+                    'monthly': 0,
+                    'long_term': 0
+                }
+        
+        return self.safe_execute(_get_premium_stats) or {
+            'total': 0, 'expiring_soon': 0, 'monthly': 0, 'long_term': 0
+        }
+
+    def _user_to_dict(self, user) -> Dict[str, Any]:
+        """SQLAlchemyオブジェクトを辞書に変換（Premium機能対応版）"""
+        if not user:
+            return None
+        
+        result = {
+            'id': user.id,
+            'discord_id': user.discord_id,
+            'user_name': user.user_name,
+            'shadowverse_id': user.shadowverse_id,
+            'rating': user.rating,
+            'trust_points': user.trust_points,
+            'win_count': user.win_count,
+            'loss_count': user.loss_count,
+            'total_matches': user.total_matches,
+            'win_streak': user.win_streak,
+            'max_win_streak': user.max_win_streak,
+            'stayed_rating': user.stayed_rating,
+            'stayed_win_count': user.stayed_win_count,
+            'stayed_loss_count': user.stayed_loss_count,
+            'stayed_total_matches': user.stayed_total_matches,
+            'stay_flag': user.stay_flag,
+            'latest_season_matched': user.latest_season_matched,
+            'class1': user.class1,
+            'class2': user.class2
+        }
+        
+        # 名前変更権フィールドが存在する場合のみ追加
+        if hasattr(user, 'name_change_available'):
+            result['name_change_available'] = user.name_change_available
+        else:
+            result['name_change_available'] = True  # デフォルト値
+        
+        # Premium残日数フィールドが存在する場合のみ追加
+        if hasattr(user, 'premium_days_remaining'):
+            result['premium_days_remaining'] = user.premium_days_remaining or 0
+        else:
+            result['premium_days_remaining'] = 0  # デフォルト値
+        
+        return result

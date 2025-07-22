@@ -1,9 +1,3 @@
-# viewmodels/__init__.py
-"""ビューモデル関連のモジュール"""
-
-# 循環インポートを避けるため、必要な時にのみインポートするように変更
-# 直接的なインポートは行わない
-
 __all__ = [
     'MatchmakingViewModel', 'ResultViewModel', 'CancelViewModel',
     'RankingViewModel', 'RecordViewModel', 'UserViewModel'
