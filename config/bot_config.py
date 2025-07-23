@@ -15,7 +15,7 @@ from viewmodels.matchmaking_vm import MatchmakingViewModel, ResultViewModel, Can
 from viewmodels.ranking_vm import RankingViewModel
 from views.matchmaking_view import MatchmakingView, ClassSelectView, ResultView, RateDisplayView
 from views.ranking_view import RankingView, RankingUpdateView, PastRankingButtonView
-from views.user_view import RegisterView, ProfileView, AchievementButtonView, NameChangeModal, check_premium_expiry, password_manager
+from views.user_view import RegisterView, ProfileView, NameChangeView, StayFunctionView, PremiumView, AchievementButtonView, NameChangeModal, check_premium_expiry, password_manager
 from views.record_view import CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView
 from models.base import db_manager
 from utils.helpers import safe_purge_channel, safe_send_message
@@ -601,39 +601,8 @@ def create_bot_1():
             import traceback
             logging.error(traceback.format_exc())
     
-    # 名前変更コマンド（新規追加）
-    @bot.slash_command(
-        name="change_name",
-        description="ユーザー名を変更します（月1回まで）"
-    )
-    async def change_name(ctx: discord.ApplicationContext):
-        """名前変更コマンド"""
-        if ctx.channel_id != COMMAND_CHANNEL_ID:
-            await ctx.respond(f"このコマンドは <#{COMMAND_CHANNEL_ID}> で実行してください。", ephemeral=True)
-            return
-        
-        try:
-            from models.user import UserModel
-            user_model = UserModel()
-            
-            # ユーザーの存在確認
-            user = user_model.get_user_by_discord_id(str(ctx.user.id))
-            if not user:
-                await ctx.respond("ユーザー登録を行ってください。", ephemeral=True)
-                return
-            
-            # 名前変更権の確認
-            if not user.get('name_change_available', True):
-                await ctx.respond("❌ 名前変更権は来月1日まで利用できません。", ephemeral=True)
-                return
-            
-            # モーダルを表示
-            modal = NameChangeModal()
-            await ctx.response.send_modal(modal)
-            
-        except Exception as e:
-            logging.error(f"Error in change_name command: {e}")
-            await ctx.respond("名前変更処理中にエラーが発生しました。", ephemeral=True)
+    # 名前変更コマンド（削除済み - プロフィールチャンネルのボタンを使用）
+    # 名前変更はプロフィールチャンネルの「名前変更」ボタンから行えます
     
     @bot.command()
     @commands.has_permissions(administrator=True)
@@ -1006,8 +975,11 @@ async def setup_bot1_channels(bot, matchmaking_vm: MatchmakingViewModel):
         profile_channel = bot.get_channel(PROFILE_CHANNEL_ID)
         if profile_channel:
             await safe_purge_channel(profile_channel)
-            await safe_send_message(profile_channel, "プロフィールを確認するにはボタンを押してください。", view=ProfileView())
-            await safe_send_message(profile_channel, "実績を確認するにはボタンを押してください。", view=AchievementButtonView())
+            await safe_send_message(profile_channel, view=ProfileView())
+            await safe_send_message(profile_channel, view=AchievementButtonView())
+            await safe_send_message(profile_channel, view=StayFunctionView())
+            await safe_send_message(profile_channel, view=NameChangeView())
+            await safe_send_message(profile_channel, view=PremiumView())
             logging.info("✅ Profile channel setup completed")
         
         # マッチングチャンネル
@@ -1069,11 +1041,11 @@ def create_bot_2():
             
             if record_channel:
                 await safe_purge_channel(record_channel)
-                await safe_send_message(record_channel, "現在シーズンの戦績を確認できます。", view=CurrentSeasonRecordView())
+                await safe_send_message(record_channel, "今シーズンの戦績を確認できます。", view=CurrentSeasonRecordView())
             
             if past_record_channel:
                 await safe_purge_channel(past_record_channel)
-                await safe_send_message(past_record_channel, "今作の過去戦績を表示します。", view=PastSeasonRecordView())
+                await safe_send_message(past_record_channel, "過去シーズンの戦績を表示します。", view=PastSeasonRecordView())
             
             # ランキングキャッシュをクリア
             ranking_vm.clear_cache()
@@ -1128,20 +1100,20 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
             await safe_purge_channel(rating_update_channel)
             await safe_send_message(
                 rating_update_channel, 
-                "下のボタンを押すと、現在のレーティングランキングを手動で取得できます。",
+                "現在のレーティングランキングを手動で取得できます。",
                 view=RankingUpdateView(ranking_vm)
             )
             # 詳細戦績ボタンも追加
             from views.record_view import DetailedRecordView, DetailedMatchHistoryView
             await safe_send_message(
                 rating_update_channel,
-                "下のボタンから詳細な戦績を確認できます。",
+                "詳細な戦績を確認できます。",
                 view=DetailedRecordView()
             )
             # 詳細な全対戦履歴ボタンも追加
             await safe_send_message(
                 rating_update_channel,
-                "下のボタンから詳細な全対戦履歴を確認できます。",
+                "詳細な全対戦履歴を確認できます。",
                 view=DetailedMatchHistoryView()
             )
             logging.info("✅ Rating update channel setup completed")
@@ -1150,7 +1122,7 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
         record_channel = bot.get_channel(RECORD_CHANNEL_ID)
         if record_channel:
             await safe_purge_channel(record_channel)
-            await safe_send_message(record_channel, "現在シーズンの戦績を確認できます。", view=CurrentSeasonRecordView())
+            await safe_send_message(record_channel, "今シーズンの戦績を確認できます。", view=CurrentSeasonRecordView())
             logging.info("✅ Record channel setup completed")
         
         # 直近50戦戦績チャンネル

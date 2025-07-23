@@ -93,13 +93,20 @@ async def safe_add_user_to_thread(thread: discord.Thread, user: discord.Member) 
                     raise
     return False
 
-async def safe_send_message(channel, content: str, **kwargs) -> Optional[discord.Message]:
+async def safe_send_message(channel, content: str = None, **kwargs) -> Optional[discord.Message]:
     """安全にメッセージを送信"""
     retries = 5
     for attempt in range(retries):
         try:
             async with api_call_semaphore:
-                message = await channel.send(content, **kwargs)
+                # contentがNoneの場合は空文字列を使用（Viewのみの場合）
+                if content is None and 'view' in kwargs:
+                    message = await channel.send(**kwargs)
+                elif content is None:
+                    # contentもviewもない場合はエラー
+                    raise ValueError("Either content or view must be provided")
+                else:
+                    message = await channel.send(content, **kwargs)
             return message
         except discord.HTTPException as e:
             if e.status == 429:

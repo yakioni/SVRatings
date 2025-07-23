@@ -124,9 +124,9 @@ class UserRegistrationModal(Modal):
         
         self.shadowverse_id_input = InputText(
             label="SHADOWVERSE_ID",
-            placeholder="13桁の数字を入力してください",
-            min_length=13,
-            max_length=13,
+            placeholder="12桁の数字を入力してください",
+            min_length=12,
+            max_length=12,
             required=True
         )
         self.add_item(self.shadowverse_id_input)
@@ -167,7 +167,7 @@ class UserRegistrationModal(Modal):
                     await interaction.response.send_message(
                         f"✅ **ユーザー {username} の登録が完了しました。**\n\n"
                         f"📝 名前変更権: 1回利用可能\n"
-                        f"💡 名前変更は `/change_name` コマンドで行えます。\n"
+                        f"💡 名前変更は プロフィールチャンネルの「名前変更」ボタンで行えます。\n"
                         f"⚠️ 権限は使用後、毎月1日に復活します。\n"
                         f"🎮 サーバーニックネームも更新されました。",
                         ephemeral=True
@@ -176,7 +176,7 @@ class UserRegistrationModal(Modal):
                     await interaction.response.send_message(
                         f"✅ **ユーザー {username} の登録が完了しました。**\n\n"
                         f"📝 名前変更権: 1回利用可能\n"
-                        f"💡 名前変更は `/change_name` コマンドで行えます。\n"
+                        f"💡 名前変更は プロフィールチャンネルの「名前変更」ボタンで行えます。\n"
                         f"⚠️ 権限は使用後、毎月1日に復活します。\n"
                         f"🔧 サーバーニックネームの変更に失敗しました（権限不足）。",
                         ephemeral=True
@@ -186,7 +186,7 @@ class UserRegistrationModal(Modal):
                     await interaction.response.send_message(
                         f"✅ **ユーザー {username} の登録が完了しました。**\n\n"
                         f"📝 名前変更権: 1回利用可能\n"
-                        f"💡 名前変更は `/change_name` コマンドで行えます。\n"
+                        f"💡 名前変更は プロフィールチャンネルの「名前変更」ボタンで行えます。\n"
                         f"⚠️ 権限は使用後、毎月1日に復活します。\n"
                         f"🔧 サーバーニックネームの変更でエラーが発生しました。",
                         ephemeral=True
@@ -433,11 +433,121 @@ class ProfileView(View):
         super().__init__(timeout=None)
         self.add_item(ProfileButton())
 
+class NameChangeView(View):
+    """名前変更専用View"""
+    
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(NameChangeButton())
+
+class StayFunctionView(View):
+    """Stay機能専用View"""
+    
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(StayFunctionButton())
+
+class PremiumView(View):
+    """Premium機能専用View"""
+    
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(PremiumButton())
+
+class NameChangeButton(Button):
+    """名前変更専用ボタン"""
+    
+    def __init__(self):
+        super().__init__(label="名前を変更する", style=discord.ButtonStyle.secondary)
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    async def callback(self, interaction: discord.Interaction):
+        """名前変更ボタンのコールバック"""
+        try:
+            from models.user import UserModel
+            user_model = UserModel()
+            
+            # ユーザーの存在確認
+            user = user_model.get_user_by_discord_id(str(interaction.user.id))
+            if not user:
+                await interaction.response.send_message("ユーザー登録を行ってください。", ephemeral=True)
+                return
+            
+            # 名前変更権の確認
+            if not user.get('name_change_available', True):
+                await interaction.response.send_message("❌ 名前変更権は来月1日まで利用できません。", ephemeral=True)
+                return
+            
+            # モーダルを表示
+            modal = NameChangeModal()
+            await interaction.response.send_modal(modal)
+            
+        except Exception as e:
+            self.logger.error(f"Error in name change button: {e}")
+            await interaction.response.send_message("名前変更処理中にエラーが発生しました。", ephemeral=True)
+
+class StayFunctionButton(Button):
+    """Stay機能専用ボタン"""
+    
+    def __init__(self):
+        super().__init__(label="Stay機能を使用する", style=discord.ButtonStyle.secondary)
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Stay機能ボタンのコールバック"""
+        user_id = str(interaction.user.id)
+        
+        try:
+            from models.user import UserModel
+            user_model = UserModel()
+            
+            user_instance = user_model.get_user_by_discord_id(user_id)
+            
+            if not user_instance:
+                await interaction.response.send_message("ユーザー情報が見つかりません。", ephemeral=True)
+                return
+            
+            # ロール確認
+            ongoing_match_role = discord.utils.get(interaction.guild.roles, name='試合中')
+            if ongoing_match_role in interaction.user.roles:
+                await interaction.response.send_message(
+                    "現在、試合中のためレートを切り替えることはできません。", 
+                    ephemeral=True
+                )
+                return
+            
+            # stay_flag の状態に応じて処理を分岐
+            if user_instance['stay_flag'] == 0 and user_instance['stayed_rating'] == 1500:
+                confirm_view = StayConfirmView(user_instance, mode="stay")
+                await interaction.response.send_message(
+                    "stay機能を使用すると、現在のレートと勝敗数が保存され、レートが1500,勝敗数が0にリセットされます。\n本当に実行しますか？",
+                    view=confirm_view,
+                    ephemeral=True
+                )
+            elif user_instance['stay_flag'] == 1:
+                confirm_view = StayConfirmView(user_instance, mode="revert")
+                await interaction.response.send_message(
+                    "stayを元に戻すと、stayedに保存されているレートと勝敗数をメインアカウントに復元します。現在のレート，試合数などは削除されます。\n本当に実行しますか？",
+                    view=confirm_view,
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "現在、stay機能を使用できる状態ではありません。", 
+                    ephemeral=True
+                )
+        except Exception as e:
+            self.logger.error(f"Error in stay function button callback: {e}")
+            await interaction.response.send_message(
+                "エラーが発生しました。", 
+                ephemeral=True
+            )
+
 class ProfileButton(Button):
     """プロフィール表示ボタン"""
     
     def __init__(self):
-        super().__init__(label="プロフィール表示", style=discord.ButtonStyle.primary)
+        super().__init__(label="プロフィールを確認する", style=discord.ButtonStyle.primary)
         self.logger = logging.getLogger(self.__class__.__name__)
     
     async def callback(self, interaction: discord.Interaction):
@@ -499,16 +609,8 @@ class ProfileButton(Button):
                     f"Premium状態 : {premium_status}\n"
                 )
                 
-                # StayButtonViewとPremiumButtonViewを作成
-                view = None
-                # '試合中' ロールを持っているか確認
-                ongoing_match_role = discord.utils.get(interaction.guild.roles, name='試合中')
-                is_in_match = ongoing_match_role in interaction.user.roles
-                
-                if not is_in_match:
-                    view = UserActionView(user_instance, interaction, premium_days > 0)
-                
-                await interaction.response.send_message(profile_message, ephemeral=True, view=view)
+                # シンプルなプロフィール表示のみ
+                await interaction.response.send_message(profile_message, ephemeral=True)
             else:
                 await interaction.response.send_message(
                     "ユーザー情報が見つかりません。ユーザー登録を行ってください。", 
@@ -737,7 +839,7 @@ class AchievementButton(Button):
     """実績表示ボタン"""
     
     def __init__(self):
-        super().__init__(style=discord.ButtonStyle.primary, label="実績")
+        super().__init__(style=discord.ButtonStyle.primary, label="実績を確認する")
         self.logger = logging.getLogger(self.__class__.__name__)
     
     async def callback(self, interaction: discord.Interaction):
