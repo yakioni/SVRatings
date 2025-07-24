@@ -233,22 +233,6 @@ class DetailedMatchHistoryView(View):
             import traceback
             logging.getLogger(self.__class__.__name__).error(traceback.format_exc())
             await interaction.followup.send("詳細対戦履歴の取得中にエラーが発生しました。", ephemeral=True)
-    
-    async def show_detailed_season_select(self, interaction: discord.Interaction):
-        """詳細戦績のシーズン選択を表示"""
-        user_model = UserModel()
-        user = user_model.get_user_by_discord_id(str(interaction.user.id))
-        
-        if not user:
-            await interaction.response.send_message("ユーザーが見つかりません。", ephemeral=True)
-            return
-        
-        # 詳細戦績用のシーズン選択を表示
-        await interaction.response.send_message(
-            content="詳細戦績のシーズンを選択してください:", 
-            view=DetailedSeasonSelectView(), 
-            ephemeral=True
-        )
 
 class DetailedSeasonSelectView(View):
     """詳細戦績用のシーズン選択View"""
@@ -285,6 +269,13 @@ class DetailedSeasonSelect(Select):
                 value=f"past_{season['id']}"
             ))
         
+        # 日付で絞り込むオプションを一番下に追加
+        options.append(discord.SelectOption(
+            label="日付で絞り込む", 
+            value="date_range",
+            emoji="📅"
+        ))
+        
         super().__init__(
             placeholder="シーズンを選択してください...", 
             options=options if options else [discord.SelectOption(label="シーズンなし", value="none")]
@@ -296,6 +287,12 @@ class DetailedSeasonSelect(Select):
         
         if selected_value == "none":
             await interaction.response.send_message("利用可能なシーズンがありません。", ephemeral=True)
+            return
+        
+        if selected_value == "date_range":
+            # 日付範囲入力モーダルを表示
+            modal = DateRangeInputModal()
+            await interaction.response.send_modal(modal)
             return
         
         await interaction.response.defer(ephemeral=True)
@@ -344,18 +341,125 @@ class DetailedSeasonSelect(Select):
             ephemeral=True
         )
 
+class DateRangeInputModal(discord.ui.Modal):
+    """日付範囲入力用のモーダル"""
+    
+    def __init__(self):
+        super().__init__(title="日付範囲を入力してください")
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 現在の日付を取得してヒントとして使用
+        from datetime import datetime, timedelta
+        from config.settings import JST
+        
+        today = datetime.now(JST)
+        today_str = today.strftime('%Y-%m-%d')
+        week_ago_str = (today - timedelta(days=7)).strftime('%Y-%m-%d')
+        
+        self.start_date_input = discord.ui.InputText(
+            label="開始日",
+            placeholder=f"例: {week_ago_str} (YYYY-MM-DD形式)",
+            required=True,
+            max_length=10
+        )
+        self.add_item(self.start_date_input)
+        
+        self.end_date_input = discord.ui.InputText(
+            label="終了日", 
+            placeholder=f"例: {today_str} (YYYY-MM-DD形式)",
+            required=True,
+            max_length=10
+        )
+        self.add_item(self.end_date_input)
+    
+    async def callback(self, interaction: discord.Interaction):
+        """モーダル送信のコールバック"""
+        start_date_str = self.start_date_input.value.strip()
+        end_date_str = self.end_date_input.value.strip()
+        
+        self.logger.info(f"Date range input: {start_date_str} to {end_date_str} by user {interaction.user.id}")
+        
+        # 日付形式のバリデーション
+        try:
+            from datetime import datetime
+            
+            # 日付のパース
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            
+            # 開始日が終了日より後でないかチェック
+            if start_date > end_date:
+                await interaction.response.send_message(
+                    "❌ **エラー:** 開始日は終了日より前の日付を指定してください。\n"
+                    f"入力された値: 開始日 `{start_date_str}`, 終了日 `{end_date_str}`",
+                    ephemeral=True
+                )
+                return
+            
+            # 未来の日付でないかチェック
+            from config.settings import JST
+            now = datetime.now(JST).replace(tzinfo=None)  # タイムゾーン情報を削除
+            
+            if end_date > now:
+                await interaction.response.send_message(
+                    "❌ **エラー:** 終了日は今日以前の日付を指定してください。\n"
+                    f"今日の日付: `{now.strftime('%Y-%m-%d')}`",
+                    ephemeral=True
+                )
+                return
+            
+            # 日数を計算
+            days_diff = (end_date - start_date).days
+            
+            # ISO形式の文字列に変換（時刻情報を追加）
+            start_date_iso = f"{start_date_str} 00:00:00"
+            end_date_iso = f"{end_date_str} 23:59:59"
+            
+            date_range = (start_date_iso, end_date_iso)
+            range_description = f"{start_date_str} ～ {end_date_str}"
+            
+            self.logger.info(f"Valid date range processed: {range_description} ({days_diff + 1}日間)")
+            
+            # クラス選択を表示
+            await interaction.response.send_message(
+                content=f"✅ **日付範囲設定完了**\n"
+                        f"📅 対象期間: **{range_description}** ({days_diff + 1}日間)\n"
+                        f"🎯 次に詳細戦績のクラスを選択してください:",
+                view=DetailedClassSelectView(season_id=None, date_range=date_range),
+                ephemeral=True
+            )
+            
+        except ValueError as e:
+            self.logger.warning(f"Invalid date format from user {interaction.user.id}: {start_date_str}, {end_date_str}")
+            await interaction.response.send_message(
+                "❌ **エラー:** 日付の形式が正しくありません。\n\n"
+                "**正しい形式:** `YYYY-MM-DD`\n"
+                "**例:** `2024-01-01`\n"
+                f"**入力された値:** 開始日 `{start_date_str}`, 終了日 `{end_date_str}`\n\n"
+                "年は4桁、月と日は2桁で入力してください。",
+                ephemeral=True
+            )
+        except Exception as e:
+            self.logger.error(f"Error in date range input from user {interaction.user.id}: {e}")
+            await interaction.response.send_message(
+                "❌ 日付の処理中にエラーが発生しました。\n"
+                "入力形式を確認して再度お試しください。",
+                ephemeral=True
+            )
+
 class DetailedClassSelectView(View):
     """詳細戦績用のクラス選択View"""
     
-    def __init__(self, season_id: Optional[int] = None):
+    def __init__(self, season_id: Optional[int] = None, date_range: Optional[tuple] = None):
         super().__init__(timeout=None)
-        self.add_item(DetailedClassSelect(season_id))
+        self.add_item(DetailedClassSelect(season_id, date_range))
 
 class DetailedClassSelect(Select):
     """詳細戦績用のクラス選択セレクト（1つまたは2つ選択可能）"""
     
-    def __init__(self, season_id: Optional[int] = None):
+    def __init__(self, season_id: Optional[int] = None, date_range: Optional[tuple] = None):
         self.season_id = season_id
+        self.date_range = date_range
         self.logger = logging.getLogger(self.__class__.__name__)
         
         # データベースからクラス名を取得
@@ -390,11 +494,13 @@ class DetailedClassSelect(Select):
                 # 全クラスを選択した場合
                 if self.season_id:
                     await record_vm.show_season_stats(interaction, user_id, self.season_id)
+                elif self.date_range:
+                    await record_vm.show_date_range_stats(interaction, user_id, self.date_range)
                 else:
                     await record_vm.show_all_time_stats(interaction, user_id)
             else:
                 # 特定のクラスを選択した場合（詳細戦績モード）
-                await record_vm.show_detailed_class_stats(interaction, user_id, selected_classes, self.season_id)
+                await record_vm.show_detailed_class_stats(interaction, user_id, selected_classes, self.season_id, self.date_range)
         
         except Exception as e:
             self.logger.error(f"Error in detailed class selection callback: {e}")

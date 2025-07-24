@@ -81,6 +81,54 @@ class RecordViewModel:
         )
         await self._delete_message_after_delay(message, 10)
     
+    async def show_date_range_stats(self, interaction: discord.Interaction, user_id: int, date_range: tuple):
+        """指定された日付範囲の統計を表示"""
+        user = self.user_model.get_user_by_discord_id(str(user_id))
+        if not user:
+            message = await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
+            await self._delete_message_after_delay(message, 10)
+            return
+        
+        start_date, end_date = date_range
+        
+        # 日付範囲での試合を取得
+        matches = self._get_matches_by_date_range(user['id'], start_date, end_date)
+        
+        # 勝敗数の計算
+        win_count = sum(1 for match in matches if match['winner_user_id'] == user['id'])
+        total_count = len(matches)
+        loss_count = total_count - win_count
+        win_rate = (win_count / total_count) * 100 if total_count > 0 else 0
+        
+        # 日付範囲の説明（時刻部分を除去）
+        start_date_str = start_date[:10] if start_date else "開始日不明"
+        end_date_str = end_date[:10] if end_date else "終了日不明"
+        range_desc = f"{start_date_str} ～ {end_date_str}"
+        
+        # より詳細な統計情報
+        if total_count > 0:
+            # 最初と最後の試合日
+            first_match_date = matches[-1]['match_date'][:10] if matches else "不明"
+            last_match_date = matches[0]['match_date'][:10] if matches else "不明"
+            
+            stats_message = (
+                f"**{user['user_name']} の期間戦績**\n"
+                f"📅 **期間:** {range_desc}\n"
+                f"🎮 **総試合数:** {total_count}戦\n"
+                f"📊 **勝率:** {win_rate:.2f}% ({win_count}勝-{loss_count}敗)\n"
+                f"🗓️ **実際の試合期間:** {first_match_date} ～ {last_match_date}"
+            )
+        else:
+            stats_message = (
+                f"**{user['user_name']} の期間戦績**\n"
+                f"📅 **期間:** {range_desc}\n"
+                f"🎮 **総試合数:** 0戦\n"
+                f"📊 この期間に試合記録はありません。"
+            )
+        
+        message = await interaction.followup.send(stats_message, ephemeral=True)
+        await self._delete_message_after_delay(message, 300)  # 5分後に削除
+    
     async def show_season_stats(self, interaction: discord.Interaction, user_id: int, season_id: int):
         """指定されたシーズンの統計を表示"""
         user = self.user_model.get_user_by_discord_id(str(user_id))
@@ -196,7 +244,8 @@ class RecordViewModel:
         await self._delete_message_after_delay(message, 300)
     
     async def show_detailed_class_stats(self, interaction: discord.Interaction, user_id: int, 
-                                      selected_classes: List[str], season_id: Optional[int] = None):
+                                      selected_classes: List[str], season_id: Optional[int] = None, 
+                                      date_range: Optional[tuple] = None):
         """詳細なクラス戦績を表示（user_class、selected_classを考慮）"""
         user = self.user_model.get_user_by_discord_id(str(user_id))
         if not user:
@@ -204,14 +253,27 @@ class RecordViewModel:
             await self._delete_message_after_delay(message, 300)
             return
         
-        # シーズン名を取得
-        season_name = None
+        # シーズン名または日付範囲を取得
+        filter_desc = None
         if season_id is not None:
             season_data = self.season_model.get_season_by_id(season_id)
             season_name = season_data['season_name'] if season_data else None
+            filter_desc = f"シーズン {season_name}" if season_name else "指定シーズン"
+        elif date_range is not None:
+            start_date, end_date = date_range
+            start_date_str = start_date[:10] if start_date else "開始日不明"
+            end_date_str = end_date[:10] if end_date else "終了日不明"
+            filter_desc = f"{start_date_str} ～ {end_date_str}"
+            season_name = None
+        else:
+            season_name = None
+            filter_desc = "全シーズン"
         
         # 詳細戦績の取得
-        matches = self._get_detailed_class_matches(user['id'], selected_classes, season_name)
+        if date_range is not None:
+            matches = self._get_detailed_class_matches_by_date(user['id'], selected_classes, date_range[0], date_range[1])
+        else:
+            matches = self._get_detailed_class_matches(user['id'], selected_classes, season_name)
         
         # 勝敗数の計算
         win_count = sum(1 for match in matches if match['winner_user_id'] == user['id'])
@@ -227,17 +289,20 @@ class RecordViewModel:
         else:
             selected_class_str = "複数クラス"
         
-        # シーズン情報を表示に含める
-        season_info = f"シーズン {season_name}" if season_name else "全シーズン"
-        
         # 詳細戦績メッセージ
         detailed_message = (
             f"**{user['user_name']} の詳細戦績**\n"
-            f"対象: {season_info}\n"
-            f"クラス: {selected_class_str}\n"
-            f"勝率: {win_rate:.2f}%\n"
-            f"{total_count}戦   {win_count}勝-{loss_count}敗"
+            f"📅 **対象:** {filter_desc}\n"
+            f"🎯 **クラス:** {selected_class_str}\n"
+            f"📊 **勝率:** {win_rate:.2f}%\n"
+            f"🎮 **戦績:** {total_count}戦   {win_count}勝-{loss_count}敗"
         )
+        
+        # 実際の試合期間を表示（日付範囲指定の場合）
+        if date_range is not None and matches:
+            first_match_date = matches[-1]['match_date'][:10] if matches else "不明"
+            last_match_date = matches[0]['match_date'][:10] if matches else "不明"
+            detailed_message += f"\n🗓️ **実際の試合期間:** {first_match_date} ～ {last_match_date}"
         
         # 最近の試合履歴も表示（最大10試合）
         if matches:
@@ -273,6 +338,143 @@ class RecordViewModel:
         
         message = await interaction.followup.send(detailed_message, ephemeral=True)
         await self._delete_message_after_delay(message, 300)
+    
+    def _get_matches_by_date_range(self, user_id: int, start_date: Optional[str], end_date: str) -> List[Dict[str, Any]]:
+        """日付範囲で試合を取得"""
+        def _get_matches(session):
+            from config.database import MatchHistory
+            from sqlalchemy import or_, and_
+            
+            # ベースクエリ
+            query = session.query(MatchHistory).filter(
+                or_(
+                    MatchHistory.user1_id == user_id,
+                    MatchHistory.user2_id == user_id
+                )
+            )
+            
+            # 日付範囲フィルター
+            if start_date:
+                query = query.filter(MatchHistory.match_date >= start_date)
+            query = query.filter(MatchHistory.match_date <= end_date)
+            
+            # 完了した試合のみ取得
+            query = query.filter(MatchHistory.winner_user_id.isnot(None))
+            
+            # 日付の降順でソート
+            query = query.order_by(MatchHistory.match_date.desc())
+            
+            matches = query.all()
+            
+            # セッション内で辞書に変換
+            return [
+                {
+                    'id': match.id,
+                    'user1_id': match.user1_id,
+                    'user2_id': match.user2_id,
+                    'match_date': match.match_date,
+                    'season_name': match.season_name,
+                    'winner_user_id': match.winner_user_id,
+                    'loser_user_id': match.loser_user_id,
+                    'user1_selected_class': getattr(match, 'user1_selected_class', None),
+                    'user2_selected_class': getattr(match, 'user2_selected_class', None)
+                }
+                for match in matches
+            ]
+        
+        return self.match_model.safe_execute(_get_matches) or []
+    
+    def _get_detailed_class_matches_by_date(self, user_id: int, selected_classes: List[str], 
+                                           start_date: Optional[str], end_date: str) -> List[Dict[str, Any]]:
+        """日付範囲での詳細なクラス戦績を取得（user_class、selected_classを考慮）"""
+        def _get_matches(session):
+            from config.database import MatchHistory
+            from sqlalchemy import or_, and_
+            
+            # ベースクエリ
+            query = session.query(MatchHistory).filter(
+                or_(
+                    MatchHistory.user1_id == user_id,
+                    MatchHistory.user2_id == user_id
+                )
+            )
+            
+            # 日付範囲フィルター
+            if start_date:
+                query = query.filter(MatchHistory.match_date >= start_date)
+            query = query.filter(MatchHistory.match_date <= end_date)
+            
+            # クラスフィルター
+            if len(selected_classes) == 1:
+                # 1つのクラスを選択：selected_classがそのクラスの試合
+                class_name = selected_classes[0]
+                query = query.filter(
+                    or_(
+                        and_(MatchHistory.user1_id == user_id,
+                             MatchHistory.user1_selected_class == class_name),
+                        and_(MatchHistory.user2_id == user_id,
+                             MatchHistory.user2_selected_class == class_name)
+                    )
+                )
+            elif len(selected_classes) == 2:
+                # 2つのクラスを選択：class_a/class_bがその組み合わせの試合
+                class1, class2 = selected_classes
+                query = query.filter(
+                    or_(
+                        and_(MatchHistory.user1_id == user_id,
+                             or_(
+                                 and_(MatchHistory.user1_class_a == class1,
+                                      MatchHistory.user1_class_b == class2),
+                                 and_(MatchHistory.user1_class_a == class2,
+                                      MatchHistory.user1_class_b == class1)
+                             )),
+                        and_(MatchHistory.user2_id == user_id,
+                             or_(
+                                 and_(MatchHistory.user2_class_a == class1,
+                                      MatchHistory.user2_class_b == class2),
+                                 and_(MatchHistory.user2_class_a == class2,
+                                      MatchHistory.user2_class_b == class1)
+                             ))
+                    )
+                )
+            
+            # 完了した試合のみ取得
+            query = query.filter(MatchHistory.winner_user_id.isnot(None))
+            
+            # 日付の降順でソート
+            query = query.order_by(MatchHistory.match_date.desc())
+            
+            matches = query.all()
+            
+            # セッション内で辞書に変換
+            return [
+                {
+                    'id': match.id,
+                    'user1_id': match.user1_id,
+                    'user2_id': match.user2_id,
+                    'match_date': match.match_date,
+                    'season_name': match.season_name,
+                    'user1_class_a': match.user1_class_a,
+                    'user1_class_b': match.user1_class_b,
+                    'user2_class_a': match.user2_class_a,
+                    'user2_class_b': match.user2_class_b,
+                    'user1_rating_change': match.user1_rating_change,
+                    'user2_rating_change': match.user2_rating_change,
+                    'winner_user_id': match.winner_user_id,
+                    'loser_user_id': match.loser_user_id,
+                    'before_user1_rating': match.before_user1_rating,
+                    'before_user2_rating': match.before_user2_rating,
+                    'after_user1_rating': match.after_user1_rating,
+                    'after_user2_rating': match.after_user2_rating,
+                    'user1_stay_flag': match.user1_stay_flag,
+                    'user2_stay_flag': match.user2_stay_flag,
+                    'user1_selected_class': getattr(match, 'user1_selected_class', None),
+                    'user2_selected_class': getattr(match, 'user2_selected_class', None)
+                }
+                for match in matches
+            ]
+        
+        return self.match_model.safe_execute(_get_matches) or []
     
     def _get_detailed_class_matches(self, user_id: int, selected_classes: List[str], 
                                    season_name: Optional[str] = None) -> List[Dict[str, Any]]:

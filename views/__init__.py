@@ -11,7 +11,7 @@ from .ranking_view import RankingView, RankingUpdateView, PastRankingButtonView
 from .record_view import (
     CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView, MatchHistoryPaginatorView,
     DetailedSeasonSelectView, DetailedClassSelectView, DetailedRecordView,
-    DetailedMatchHistoryView, DetailedMatchHistoryPaginatorView
+    DetailedMatchHistoryView, DetailedMatchHistoryPaginatorView, DateRangeInputModal
 )
 
 __all__ = [
@@ -30,5 +30,5 @@ __all__ = [
     # Record関連
     'CurrentSeasonRecordView', 'PastSeasonRecordView', 'Last50RecordView', 'MatchHistoryPaginatorView',
     'DetailedSeasonSelectView', 'DetailedClassSelectView', 'DetailedRecordView',
-    'DetailedMatchHistoryView', 'DetailedMatchHistoryPaginatorView'
+    'DetailedMatchHistoryView', 'DetailedMatchHistoryPaginatorView', 'DateRangeInputModal'
 ]
