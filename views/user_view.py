@@ -146,9 +146,9 @@ class UserRegistrationModal(Modal):
             await interaction.response.send_message("名前は12文字以内にしてください。", ephemeral=True)
             return
         
-        if not shadowverse_id.isdigit() or len(shadowverse_id) != 13:
+        if not shadowverse_id.isdigit() or len(shadowverse_id) != 12:
             await interaction.response.send_message(
-                "SHADOWVERSE_IDは13桁の数字である必要があります。", 
+                "IDは12桁の数字である必要があります。", 
                 ephemeral=True
             )
             return

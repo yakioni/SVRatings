@@ -136,3 +136,17 @@ def validate_config():
     
     logging.info("✅ Configuration validated successfully")
     return True
+
+CLASS_EMOJIS = {
+    "エルフ": "<:elf:1398571636835487835>",
+    "ロイヤル": "<:royal:1398571648835391538>",
+    "ウィッチ": "<:witch:1398571651209101322>",
+    "ドラゴン": "<:dragon:1398571634901651566>",
+    "ナイトメア": "<:nightmare:1398571645987455056>",
+    "ビショップ": "<:bishop:1398571632460828753>",
+    "ネメシス": "<:nemesis:1398571640924672020>",
+}
+
+def get_class_emoji(class_name: str) -> str:
+    """クラス名に対応する絵文字を取得"""
+    return CLASS_EMOJIS.get(class_name, "🎯")
