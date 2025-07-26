@@ -1,5 +1,5 @@
 import discord
-from discord.ui import View, Button, Select
+from discord.ui import View, Button, Select, Modal, InputText
 import asyncio
 from typing import List, Optional, Dict
 from sqlalchemy import desc
@@ -14,12 +14,19 @@ class CurrentSeasonRecordView(View):
     def __init__(self):
         super().__init__(timeout=None)
         
-        # 既存の現在シーズンボタンのみ
+        # 既存の現在シーズンボタン
         current_season_button = Button(label="現在のシーズン", style=discord.ButtonStyle.primary)
         async def current_season_callback(interaction):
             await self.show_class_select(interaction)
         current_season_button.callback = current_season_callback
         self.add_item(current_season_button)
+        
+        # 新しいユーザー検索ボタンを追加
+        user_search_button = Button(label="ユーザーとの対戦成績", style=discord.ButtonStyle.secondary, emoji="🔍")
+        async def user_search_callback(interaction):
+            await self.show_user_search(interaction)
+        user_search_button.callback = user_search_callback
+        self.add_item(user_search_button)
     
     async def show_class_select(self, interaction: discord.Interaction):
         """通常のクラス選択を表示"""
@@ -36,12 +43,439 @@ class CurrentSeasonRecordView(View):
         
         if season:
             await interaction.response.send_message(
-                content="クラスを選択してください:", 
+                content="クラスを選択してください：", 
                 view=ClassSelectView(season_id=season.id), 
                 ephemeral=True
             )
         else:
             await interaction.response.send_message("シーズンが見つかりません。", ephemeral=True)
+    
+    async def show_user_search(self, interaction: discord.Interaction):
+        """ユーザー検索モーダルを表示"""
+        user_model = UserModel()
+        user = user_model.get_user_by_discord_id(str(interaction.user.id))
+        
+        if not user:
+            await interaction.response.send_message("ユーザー登録を行ってください。", ephemeral=True)
+            return
+        
+        # ユーザー検索モーダルを表示
+        modal = UserSearchModal()
+        await interaction.response.send_modal(modal)
+
+class UserSearchModal(Modal):
+    """ユーザー検索用のモーダル"""
+    
+    def __init__(self):
+        super().__init__(title="ユーザー検索")
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        self.user_input = InputText(
+            label="検索するユーザー名を入力してください",
+            placeholder="完全一致または部分一致で検索します",
+            required=True,
+            max_length=50
+        )
+        self.add_item(self.user_input)
+    
+    async def callback(self, interaction: discord.Interaction):
+        """ユーザー検索の処理"""
+        search_query = self.user_input.value.strip()
+        
+        if not search_query:
+            await interaction.response.send_message("検索クエリが入力されていません。", ephemeral=True)
+            return
+        
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            # 検索実行者の情報を取得
+            user_model = UserModel()
+            searcher = user_model.get_user_by_discord_id(str(interaction.user.id))
+            
+            if not searcher:
+                await interaction.followup.send("ユーザー登録を行ってください。", ephemeral=True)
+                return
+            
+            # ユーザー検索を実行
+            search_results = user_model.search_users(search_query)
+            
+            if not search_results:
+                await interaction.followup.send(
+                    f"「{search_query}」に一致するユーザーが見つかりませんでした。", 
+                    ephemeral=True
+                )
+                return
+            
+            # 自分自身を検索結果から除外
+            search_results = [user for user in search_results if user['id'] != searcher['id']]
+            
+            if not search_results:
+                await interaction.followup.send(
+                    "自分以外に一致するユーザーが見つかりませんでした。", 
+                    ephemeral=True
+                )
+                return
+            
+            if len(search_results) == 1:
+                # 1人だけ見つかった場合、直接対戦成績を表示
+                target_user = search_results[0]
+                await self.show_vs_stats(interaction, searcher, target_user)
+            else:
+                # 複数見つかった場合、選択肢を表示
+                await self.show_user_selection(interaction, searcher, search_results, search_query)
+                
+        except Exception as e:
+            self.logger.error(f"Error in user search: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            await interaction.followup.send("検索中にエラーが発生しました。", ephemeral=True)
+    
+    async def show_user_selection(self, interaction: discord.Interaction, searcher: dict, 
+                                 search_results: List[dict], search_query: str):
+        """複数ユーザーが見つかった場合の選択画面"""
+        if len(search_results) > 25:
+            # 選択肢が多すぎる場合は最初の25人のみ表示
+            search_results = search_results[:25]
+            note = f"\n\n（検索結果が多いため、最初の25人のみ表示しています）"
+        else:
+            note = ""
+        
+        options = []
+        for user in search_results:
+            # Discordのユーザー情報も取得を試行
+            discord_user = interaction.guild.get_member(int(user['discord_id']))
+            display_name = discord_user.display_name if discord_user else "不明"
+            
+            option_label = f"{user['user_name']} ({display_name})"
+            if len(option_label) > 100:  # Discordの制限
+                option_label = option_label[:97] + "..."
+            
+            options.append(discord.SelectOption(
+                label=option_label,
+                value=str(user['id']),
+                description=f"ID： {user['shadowverse_id'][:8]}..."
+            ))
+        
+        select = UserSelectionSelect(searcher, search_results)
+        view = View()
+        view.add_item(select)
+        
+        await interaction.followup.send(
+            f"「{search_query}」の検索結果：{len(search_results)}人が見つかりました。\n"
+            f"対戦成績を表示したいユーザーを選択してください。{note}",
+            view=view,
+            ephemeral=True
+        )
+    
+    async def show_vs_stats(self, interaction: discord.Interaction, searcher: dict, target_user: dict):
+        """対戦成績を表示"""
+        try:
+            # 対戦履歴を取得
+            match_model = MatchModel()
+            vs_matches = match_model.get_user_vs_user_history(searcher['id'], target_user['id'])
+            
+            # user_dataが辞書かオブジェクトかを判定して適切にアクセス
+            def get_attr(data, attr_name, default=None):
+                if isinstance(data, dict):
+                    return data.get(attr_name, default)
+                else:
+                    return getattr(data, attr_name, default)
+            
+            searcher_name = get_attr(searcher, 'user_name', 'Unknown')
+            target_name = get_attr(target_user, 'user_name', 'Unknown')
+            
+            if not vs_matches:
+                await interaction.followup.send(
+                    f"**{searcher_name}** vs **{target_name}** の対戦履歴はありません。",
+                    ephemeral=True
+                )
+                return
+            
+            # 勝敗を集計
+            searcher_wins = 0
+            target_wins = 0
+            
+            for match in vs_matches:
+                if match['winner_user_id'] == searcher['id']:
+                    searcher_wins += 1
+                elif match['winner_user_id'] == target_user['id']:
+                    target_wins += 1
+            
+            total_matches = searcher_wins + target_wins
+            if total_matches == 0:
+                await interaction.followup.send(
+                    f"**{searcher_name}** vs **{target_name}** の完了した対戦はありません。",
+                    ephemeral=True
+                )
+                return
+            
+            # 勝率と割合を計算
+            searcher_win_rate = (searcher_wins / total_matches) * 100
+            target_win_rate = (target_wins / total_matches) * 100
+            
+            # Discordのユーザー情報を取得
+            discord_target = interaction.guild.get_member(int(target_user['discord_id']))
+            target_display_name = discord_target.display_name if discord_target else "不明"
+            
+            # 対戦成績メッセージを作成
+            stats_message = (
+                f"**🆚 対戦成績**\n"
+                f"**{searcher_name}** vs **{target_name}** ({target_display_name})\n\n"
+                f"📊 **総対戦数：** {total_matches}戦\n"
+                f"🏆 **{searcher_name}：** {searcher_wins}勝 ({searcher_win_rate:.1f}%)\n"
+                f"🏆 **{target_name}：** {target_wins}勝 ({target_win_rate:.1f}%)\n\n"
+                f"📈 **勝率比較：**\n"
+                f"├ あなた： {searcher_win_rate:.1f}%\n"
+                f"└ 相手： {target_win_rate:.1f}%"
+            )
+            
+            # 対戦履歴表示用のビューを作成
+            view = UserVsUserHistoryView(searcher, target_user, vs_matches)
+            
+            await interaction.followup.send(
+                stats_message,
+                view=view,
+                ephemeral=True
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error showing vs stats: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            await interaction.followup.send("対戦成績の取得中にエラーが発生しました。", ephemeral=True)
+
+class UserSelectionSelect(Select):
+    """ユーザー選択用のセレクト"""
+    
+    def __init__(self, searcher: dict, search_results: List[dict]):
+        self.searcher = searcher
+        self.search_results = search_results
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 選択肢を作成
+        options = []
+        for user in search_results:
+            option_label = user['user_name']
+            if len(option_label) > 100:
+                option_label = option_label[:97] + "..."
+            
+            options.append(discord.SelectOption(
+                label=option_label,
+                value=str(user['id']),
+                description=f"ID： {user['shadowverse_id'][:8]}..."
+            ))
+        
+        super().__init__(
+            placeholder="ユーザーを選択してください...",
+            options=options
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """ユーザー選択のコールバック"""
+        selected_user_id = int(self.values[0])
+        
+        # 選択されたユーザーを取得
+        target_user = None
+        for user in self.search_results:
+            if user['id'] == selected_user_id:
+                target_user = user
+                break
+        
+        if not target_user:
+            await interaction.response.send_message("選択されたユーザーが見つかりません。", ephemeral=True)
+            return
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        # 対戦成績を表示
+        modal = UserSearchModal()
+        await modal.show_vs_stats(interaction, self.searcher, target_user)
+
+class UserVsUserHistoryView(View):
+    """ユーザー間対戦履歴表示View"""
+    
+    def __init__(self, searcher: dict, target_user: dict, vs_matches: List[dict]):
+        super().__init__(timeout=600)
+        self.searcher = searcher
+        self.target_user = target_user
+        self.vs_matches = vs_matches
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 対戦履歴表示ボタンを追加
+        history_button = Button(
+            label="📖 対戦履歴を表示", 
+            style=discord.ButtonStyle.primary
+        )
+        history_button.callback = self.show_match_history
+        self.add_item(history_button)
+    
+    async def show_match_history(self, interaction: discord.Interaction):
+        """対戦履歴を表示"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            # user_dataが辞書かオブジェクトかを判定して適切にアクセス
+            def get_attr(data, attr_name, default=None):
+                if isinstance(data, dict):
+                    return data.get(attr_name, default)
+                else:
+                    return getattr(data, attr_name, default)
+            
+            searcher_name = get_attr(self.searcher, 'user_name', 'Unknown')
+            target_name = get_attr(self.target_user, 'user_name', 'Unknown')
+            searcher_id = get_attr(self.searcher, 'id')
+            target_id = get_attr(self.target_user, 'id')
+            
+            # 完了した試合のみフィルタリング
+            completed_matches = []
+            for match in self.vs_matches:
+                if (match.get('winner_user_id') is not None and 
+                    match.get('after_user1_rating') is not None and 
+                    match.get('after_user2_rating') is not None):
+                    completed_matches.append(match)
+            
+            if not completed_matches:
+                await interaction.followup.send(
+                    f"**{searcher_name}** vs **{target_name}** の完了した対戦履歴はありません。",
+                    ephemeral=True
+                )
+                return
+            
+            # Embedを作成して対戦履歴を表示
+            embeds = []
+            current_embed = None
+            matches_per_embed = 8  # 詳細情報があるので少なめに設定
+            
+            for i, match in enumerate(completed_matches):
+                # 8試合ごとに新しいEmbedを作成
+                if i % matches_per_embed == 0:
+                    page_num = i // matches_per_embed + 1
+                    total_pages = (len(completed_matches) + matches_per_embed - 1) // matches_per_embed
+                    current_embed = discord.Embed(
+                        title=f"{searcher_name} vs {target_name} 対戦履歴 (Page {page_num}/{total_pages})",
+                        description=f"総対戦数： {len(completed_matches)}試合",
+                        color=discord.Color.purple()
+                    )
+                    embeds.append(current_embed)
+                
+                # 検索者の視点で情報を整理
+                if match['user1_id'] == searcher_id:
+                    # 検索者がuser1
+                    searcher_rating_change = match.get('user1_rating_change', 0)
+                    target_rating_change = match.get('user2_rating_change', 0)
+                    searcher_after_rating = match.get('after_user1_rating')
+                    target_after_rating = match.get('after_user2_rating')
+                    searcher_won = match['winner_user_id'] == searcher_id
+                    searcher_selected_class = match.get('user1_selected_class', 'Unknown')
+                    target_selected_class = match.get('user2_selected_class', 'Unknown')
+                else:
+                    # 検索者がuser2
+                    searcher_rating_change = match.get('user2_rating_change', 0)
+                    target_rating_change = match.get('user1_rating_change', 0)
+                    searcher_after_rating = match.get('after_user2_rating')
+                    target_after_rating = match.get('after_user1_rating')
+                    searcher_won = match['winner_user_id'] == searcher_id
+                    searcher_selected_class = match.get('user2_selected_class', 'Unknown')
+                    target_selected_class = match.get('user1_selected_class', 'Unknown')
+                
+                # None値チェックとデフォルト値設定
+                if searcher_rating_change is None:
+                    searcher_rating_change = 0
+                if target_rating_change is None:
+                    target_rating_change = 0
+                if searcher_after_rating is None:
+                    searcher_after_rating = 0
+                if target_after_rating is None:
+                    target_after_rating = 0
+                
+                # クラス情報の整理
+                if not searcher_selected_class:
+                    searcher_selected_class = 'Unknown'
+                if not target_selected_class:
+                    target_selected_class = 'Unknown'
+                
+                # 試合結果の表示
+                result_emoji = "🔵" if searcher_won else "🔴"
+                result_text = "勝利" if searcher_won else "敗北"
+                searcher_rating_change_str = f"{searcher_rating_change:+.0f}" if searcher_rating_change != 0 else "±0"
+                target_rating_change_str = f"{target_rating_change:+.0f}" if target_rating_change != 0 else "±0"
+                
+                # 日付のフォーマット
+                match_date = match.get('match_date', '')
+                if match_date:
+                    match_date = match_date[:16]
+                else:
+                    match_date = 'Unknown'
+                
+                # シーズン情報
+                season_name = match.get('season_name', 'Unknown')
+                
+                field_value = (
+                    f"**結果：** {result_text}\n"
+                    f"**シーズン：** {season_name}\n"
+                    f"**あなたのクラス：** {searcher_selected_class}\n"
+                    f"**相手のクラス：** {target_selected_class}\n"
+                    f"**レート変動：**\n"
+                    f"├ あなた： {searcher_rating_change_str} (→ {searcher_after_rating:.0f})\n"
+                    f"└ 相手： {target_rating_change_str} (→ {target_after_rating:.0f})"
+                )
+                
+                current_embed.add_field(
+                    name=f"{result_emoji} {match_date}",
+                    value=field_value,
+                    inline=False
+                )
+            
+            # 最初のEmbedを送信
+            if embeds:
+                message = await interaction.followup.send(embed=embeds[0], ephemeral=True)
+                
+                # 複数ページがある場合はページネーションを追加
+                if len(embeds) > 1:
+                    view = UserVsUserHistoryPaginatorView(embeds)
+                    await message.edit(view=view)
+            
+        except Exception as e:
+            self.logger.error(f"Error displaying vs user match history: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            await interaction.followup.send("対戦履歴の取得中にエラーが発生しました。", ephemeral=True)
+
+class UserVsUserHistoryPaginatorView(View):
+    """ユーザー間対戦履歴のページネーションView"""
+    
+    def __init__(self, embeds: List[discord.Embed]):
+        super().__init__(timeout=600)
+        self.embeds = embeds
+        self.current = 0
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    @discord.ui.button(label="⬅️ 前へ", style=discord.ButtonStyle.primary)
+    async def previous(self, button: Button, interaction: discord.Interaction):
+        """前のページへ"""
+        if self.current > 0:
+            self.current -= 1
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+        else:
+            await interaction.response.defer()
+    
+    @discord.ui.button(label="➡️ 次へ", style=discord.ButtonStyle.primary)
+    async def next(self, button: Button, interaction: discord.Interaction):
+        """次のページへ"""
+        if self.current < len(self.embeds) - 1:
+            self.current += 1
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+        else:
+            await interaction.response.defer()
+    
+    async def on_timeout(self):
+        """タイムアウト時の処理"""
+        try:
+            for item in self.children:
+                item.disabled = True
+        except Exception as e:
+            self.logger.error(f"Error in on_timeout: {e}")
 
 class DetailedRecordView(View):
     """詳細戦績表示View（レーティング更新チャンネル用）"""

@@ -1067,7 +1067,7 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
     ranking_view = None
     
     try:
-        # ランキングチャンネル（今作現在）
+        # ランキングチャンネル（現在）
         ranking_channel = bot.get_channel(RANKING_CHANNEL_ID)
         if ranking_channel:
             await safe_purge_channel(ranking_channel)

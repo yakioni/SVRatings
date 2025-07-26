@@ -1,6 +1,3 @@
-# views/__init__.py
-# 既存のインポートはそのまま残し、以下を追加してください
-
 from .user_view import (
     RegisterView, ProfileView, NameChangeView, StayFunctionView, PremiumView,
     AchievementButtonView, NameChangeModal, PremiumModal, PremiumExtendConfirmView, 
@@ -15,10 +12,12 @@ from .record_view import (
     CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView, MatchHistoryPaginatorView,
     DetailedSeasonSelectView, DetailedClassSelectView, DetailedRecordView,
     DetailedMatchHistoryView, DetailedMatchHistoryPaginatorView, DateRangeInputModal,
-    # 新しく追加するクラス
+    # 対戦相手クラス分析関連
     OpponentClassAnalysisView, OpponentAnalysisSeasonSelectView, OpponentAnalysisSeasonSelect,
     OpponentAnalysisDateRangeModal, OpponentAnalysisClassSelectView, OpponentAnalysisClassSelect,
-    OpponentAnalysisPaginatorView
+    OpponentAnalysisPaginatorView,
+    # 新しく追加するユーザー検索関連
+    UserSearchModal, UserSelectionSelect, UserVsUserHistoryView, UserVsUserHistoryPaginatorView
 )
 
 __all__ = [
@@ -38,8 +37,10 @@ __all__ = [
     'CurrentSeasonRecordView', 'PastSeasonRecordView', 'Last50RecordView', 'MatchHistoryPaginatorView',
     'DetailedSeasonSelectView', 'DetailedClassSelectView', 'DetailedRecordView',
     'DetailedMatchHistoryView', 'DetailedMatchHistoryPaginatorView', 'DateRangeInputModal',
-    # 新しく追加するクラス
+    # 対戦相手クラス分析関連
     'OpponentClassAnalysisView', 'OpponentAnalysisSeasonSelectView', 'OpponentAnalysisSeasonSelect',
     'OpponentAnalysisDateRangeModal', 'OpponentAnalysisClassSelectView', 'OpponentAnalysisClassSelect',
-    'OpponentAnalysisPaginatorView'
+    'OpponentAnalysisPaginatorView',
+    # 新しく追加するユーザー検索関連
+    'UserSearchModal', 'UserSelectionSelect', 'UserVsUserHistoryView', 'UserVsUserHistoryPaginatorView'
 ]
