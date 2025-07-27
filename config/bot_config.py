@@ -1035,17 +1035,19 @@ def create_bot_2():
         nonlocal global_ranking_view
         
         try:
-            # 戦績チャンネルの更新
+            # 戦績チャンネルの更新（直近50戦機能統合版）
             record_channel = bot.get_channel(RECORD_CHANNEL_ID)
             past_record_channel = bot.get_channel(PAST_RECORD_CHANNEL_ID)
             
             if record_channel:
                 await safe_purge_channel(record_channel)
-                await safe_send_message(record_channel, "今シーズンの戦績を確認できます。", view=CurrentSeasonRecordView())
+                await safe_send_message(record_channel, "今シーズンの戦績と直近50戦を確認できます。", view=CurrentSeasonRecordView())
             
             if past_record_channel:
                 await safe_purge_channel(past_record_channel)
                 await safe_send_message(past_record_channel, "過去シーズンの戦績を表示します。", view=PastSeasonRecordView())
+            
+            # 直近50戦専用チャンネルは削除（record_channelに統合）
             
             # ランキングキャッシュをクリア
             ranking_vm.clear_cache()
@@ -1078,59 +1080,17 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
             # 説明メッセージとボタンを先に表示
             await safe_send_message(
                 ranking_channel,
-                "ランキングを閲覧するにはボタンを押してください。レーティングランキングは1時間ごとに更新されます。",
+                "現在のランキングを表示します。",
                 view=ranking_view
             )
-            
-            # レーティングランキングを常時表示
-            await ranking_view.show_initial_rating_ranking(ranking_channel)
-            
             logging.info("✅ Ranking channel setup completed")
         
-        # 過去ランキングチャンネル（今作過去シーズン）
-        past_ranking_channel = bot.get_channel(PAST_RANKING_CHANNEL_ID)
-        if past_ranking_channel:
-            await safe_purge_channel(past_ranking_channel)
-            await safe_send_message(past_ranking_channel, "今作の過去ランキングを表示します。", view=PastRankingButtonView(ranking_vm))
-            logging.info("✅ Past ranking channel setup completed")
-        
-        # レーティング手動更新チャンネル（詳細戦績機能も追加）
-        rating_update_channel = bot.get_channel(RATING_UPDATE_CHANNEL_ID)
-        if rating_update_channel:
-            await safe_purge_channel(rating_update_channel)
-            await safe_send_message(
-                rating_update_channel, 
-                "現在のレーティングランキングを手動で取得できます。",
-                view=RankingUpdateView(ranking_vm)
-            )
-            # 詳細戦績ボタンも追加
-            from views.record_view import DetailedRecordView, DetailedMatchHistoryView
-            await safe_send_message(
-                rating_update_channel,
-                "詳細な戦績を確認できます。",
-                view=DetailedRecordView()
-            )
-            # 詳細な全対戦履歴ボタンも追加
-            await safe_send_message(
-                rating_update_channel,
-                "詳細な全対戦履歴を確認できます。",
-                view=DetailedMatchHistoryView()
-            )
-            logging.info("✅ Rating update channel setup completed")
-        
-        # 戦績チャンネル
+        # 戦績チャンネル（現在シーズン + 直近50戦）
         record_channel = bot.get_channel(RECORD_CHANNEL_ID)
         if record_channel:
             await safe_purge_channel(record_channel)
-            await safe_send_message(record_channel, "今シーズンの戦績を確認できます。", view=CurrentSeasonRecordView())
+            await safe_send_message(record_channel, "今シーズンの戦績と直近50戦を確認できます。", view=CurrentSeasonRecordView())
             logging.info("✅ Record channel setup completed")
-        
-        # 直近50戦戦績チャンネル
-        last50_record_channel = bot.get_channel(LAST_50_MATCHES_RECORD_CHANNEL_ID)
-        if last50_record_channel:
-            await safe_purge_channel(last50_record_channel)
-            await safe_send_message(last50_record_channel, "直近50戦の戦績を確認できます。", view=Last50RecordView())
-            logging.info("✅ Last 50 matches channel setup completed")
         
         # 過去戦績チャンネル（前作対応）
         past_record_channel = bot.get_channel(PAST_RECORD_CHANNEL_ID)
@@ -1138,6 +1098,9 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
             await safe_purge_channel(past_record_channel)
             await safe_send_message(past_record_channel, "前作の戦績を表示します。", view=PastSeasonRecordView())
             logging.info("✅ Past record channel setup completed")
+        
+        # 注意: LAST_50_MATCHES_RECORD_CHANNEL_IDは使用しなくなりました
+        # 直近50戦機能はrecord_channelに統合されました
         
     except Exception as e:
         logging.error(f"❌ Error setting up Bot2 channels: {e}")

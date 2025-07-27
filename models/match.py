@@ -488,3 +488,40 @@ class MatchModel(BaseModel):
             return [self._match_to_dict(match) for match in matches]
         
         return self.safe_execute(_get_recent) or []
+    
+    def get_recent_opponents(self, user_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        def _get_recent_opponents(session: Session):
+            # 最近の試合から対戦相手を取得
+            recent_matches = session.query(self.Match).filter(
+                or_(
+                    self.Match.user1_id == user_id,
+                    self.Match.user2_id == user_id
+                )
+            ).filter(
+                self.Match.winner_user_id.is_not(None)  # 完了した試合のみ
+            ).order_by(desc(self.Match.created_at)).limit(limit * 2).all()  # 十分な数を取得
+            
+            # 対戦相手のIDを収集
+            opponent_ids = set()
+            for match in recent_matches:
+                if match.user1_id == user_id:
+                    opponent_ids.add(match.user2_id)
+                else:
+                    opponent_ids.add(match.user1_id)
+            
+            # 対戦相手の情報を取得
+            from models.user import UserModel
+            user_model = UserModel()
+            opponents = []
+            
+            for opponent_id in opponent_ids:
+                opponent = user_model.get_user_by_id(opponent_id)
+                if opponent:
+                    opponents.append(opponent)
+                
+                if len(opponents) >= limit:
+                    break
+            
+            return opponents
+        return self.safe_execute(_get_recent_opponents) or []
+    

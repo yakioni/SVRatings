@@ -12,12 +12,9 @@ from .record_view import (
     CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView, MatchHistoryPaginatorView,
     DetailedSeasonSelectView, DetailedClassSelectView, DetailedRecordView,
     DetailedMatchHistoryView, DetailedMatchHistoryPaginatorView, DateRangeInputModal,
-    # 対戦相手クラス分析関連
     OpponentClassAnalysisView, OpponentAnalysisSeasonSelectView, OpponentAnalysisSeasonSelect,
     OpponentAnalysisDateRangeModal, OpponentAnalysisClassSelectView, OpponentAnalysisClassSelect,
-    OpponentAnalysisPaginatorView,
-    # 新しく追加するユーザー検索関連
-    UserSearchModal, UserSelectionSelect, UserVsUserHistoryView, UserVsUserHistoryPaginatorView
+    OpponentAnalysisPaginatorView, Last50MatchesView, MatchOpponentButton
 )
 
 __all__ = [
@@ -41,6 +38,8 @@ __all__ = [
     'OpponentClassAnalysisView', 'OpponentAnalysisSeasonSelectView', 'OpponentAnalysisSeasonSelect',
     'OpponentAnalysisDateRangeModal', 'OpponentAnalysisClassSelectView', 'OpponentAnalysisClassSelect',
     'OpponentAnalysisPaginatorView',
-    # 新しく追加するユーザー検索関連
-    'UserSearchModal', 'UserSelectionSelect', 'UserVsUserHistoryView', 'UserVsUserHistoryPaginatorView'
+    # 対戦履歴関連（ユーザー検索機能は削除）
+    'UserVsUserHistoryView', 'UserVsUserHistoryPaginatorView',
+    # 新しい直近50戦関連
+    'Last50MatchesView', 'MatchOpponentButton'
 ]
