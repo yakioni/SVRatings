@@ -327,14 +327,34 @@ class RecordViewModel:
                     else:
                         return getattr(data, attr_name, default)
                 
-                opponent_name = get_attr(opponent_data, 'user_name', 'Unknown') if opponent_data else 'Unknown'
+                if opponent_data:
+                    opponent_name = get_attr(opponent_data, 'user_name', 'Unknown')
+                    opponent_discord_id = get_attr(opponent_data, 'discord_id', None)
+                    
+                    # Discord Username を取得
+                    opponent_username = None
+                    if opponent_discord_id:
+                        try:
+                            # interactionオブジェクトが利用可能な場合
+                            discord_member = interaction.guild.get_member(int(opponent_discord_id))
+                            if discord_member:
+                                opponent_username = discord_member.name
+                        except (ValueError, AttributeError):
+                            pass
+                    
+                    if opponent_username:
+                        opponent_display = f"{opponent_name} (@{opponent_username})"
+                    else:
+                        opponent_display = opponent_name
+                else:
+                    opponent_display = 'Unknown'
                 
                 result_emoji = "🔵" if user_won else "🔴"
                 result_text = "勝利" if user_won else "敗北"
                 
                 match_date = match.get('match_date', '')[:10] if match.get('match_date') else 'Unknown'
                 
-                detailed_message += f"\n{i}. {result_emoji} vs {opponent_name} ({user_selected_class}) - {result_text} ({match_date})"
+                detailed_message += f"\n{i}. {result_emoji} vs {opponent_display} ({user_selected_class}) - {result_text} ({match_date})"
         
         message = await interaction.followup.send(detailed_message, ephemeral=True)
         await self._delete_message_after_delay(message, 300)

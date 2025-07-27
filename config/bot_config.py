@@ -16,7 +16,7 @@ from viewmodels.ranking_vm import RankingViewModel
 from views.matchmaking_view import MatchmakingView, ClassSelectView, ResultView, RateDisplayView
 from views.ranking_view import RankingView, RankingUpdateView, PastRankingButtonView
 from views.user_view import RegisterView, ProfileView, NameChangeView, StayFunctionView, PremiumView, AchievementButtonView, NameChangeModal, check_premium_expiry, password_manager
-from views.record_view import CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView
+from views.record_view import CurrentSeasonRecordView, PastSeasonRecordView, Last50RecordView, DetailedRecordView
 from models.base import db_manager
 from utils.helpers import safe_purge_channel, safe_send_message
 from utils.helpers import safe_create_thread, safe_add_user_to_thread, assign_role
@@ -966,7 +966,7 @@ async def setup_bot1_channels(bot, matchmaking_vm: MatchmakingViewModel):
             await safe_purge_channel(welcome_channel)
             await safe_send_message(
                 welcome_channel,
-                "**SV Ratingsへようこそ！**\n以下のボタンを押してユーザー登録を行ってください。詳しくは☑┊quick-startを参照してください。",
+                "**SV Ratingsへようこそ！**\n以下のボタンを押してユーザー登録を行ってください。登録したIDは変更できません。ご注意ください。",
                 view=RegisterView()
             )
             logging.info("✅ Welcome channel setup completed")
@@ -1031,7 +1031,7 @@ def create_bot_2():
     
     @tasks.loop(hours=1)
     async def update_stats_periodically():
-        """統計情報の定期更新"""
+        """統計情報の定期更新（修正版）"""
         nonlocal global_ranking_view
         
         try:
@@ -1041,13 +1041,38 @@ def create_bot_2():
             
             if record_channel:
                 await safe_purge_channel(record_channel)
-                await safe_send_message(record_channel, "今シーズンの戦績と直近50戦を確認できます。", view=CurrentSeasonRecordView())
+                await safe_send_message(record_channel, "今シーズンのBO1単位の戦績を確認できます。", view=CurrentSeasonRecordView())
             
             if past_record_channel:
                 await safe_purge_channel(past_record_channel)
                 await safe_send_message(past_record_channel, "過去シーズンの戦績を表示します。", view=PastSeasonRecordView())
             
-            # 直近50戦専用チャンネルは削除（record_channelに統合）
+            # 過去ランキングチャンネルの更新
+            past_ranking_channel = bot.get_channel(PAST_RANKING_CHANNEL_ID)
+            if past_ranking_channel:
+                await safe_purge_channel(past_ranking_channel)
+                await safe_send_message(
+                    past_ranking_channel, 
+                    "過去シーズンのランキングを表示します。", 
+                    view=PastRankingButtonView(ranking_vm)
+                )
+            
+            # ランキング更新チャンネルの更新
+            rating_update_channel = bot.get_channel(RATING_UPDATE_CHANNEL_ID)
+            if rating_update_channel:
+                await safe_purge_channel(rating_update_channel)
+                # ランキング更新機能
+                await safe_send_message(
+                    rating_update_channel, 
+                    "ランキングの更新を行えます。", 
+                    view=RankingUpdateView(ranking_vm)
+                )
+                # 詳細戦績機能
+                await safe_send_message(
+                    rating_update_channel, 
+                    "2デッキBO1単位での戦績を確認できます", 
+                    view=DetailedRecordView()
+                )
             
             # ランキングキャッシュをクリア
             ranking_vm.clear_cache()
@@ -1058,7 +1083,7 @@ def create_bot_2():
                 if ranking_channel:
                     await global_ranking_view.show_initial_rating_ranking(ranking_channel)
                     logging.info("✅ Rating ranking updated automatically")
-            
+                    
         except Exception as e:
             logging.error(f"Error in update_stats_periodically: {e}")
     
@@ -1085,18 +1110,55 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
             )
             logging.info("✅ Ranking channel setup completed")
         
+        # 過去ランキングチャンネル（過去シーズン）
+        past_ranking_channel = bot.get_channel(PAST_RANKING_CHANNEL_ID)
+        if past_ranking_channel:
+            await safe_purge_channel(past_ranking_channel)
+            await safe_send_message(
+                past_ranking_channel, 
+                "過去シーズンのランキングを表示します。", 
+                view=PastRankingButtonView(ranking_vm)
+            )
+            logging.info("✅ Past ranking channel setup completed")
+        
+        # ランキング更新チャンネル（ランキング更新 + 詳細戦績）
+        rating_update_channel = bot.get_channel(RATING_UPDATE_CHANNEL_ID)
+        if rating_update_channel:
+            await safe_purge_channel(rating_update_channel)
+            # ランキング更新機能
+            await safe_send_message(
+                rating_update_channel, 
+                "ランキングの更新を行えます。", 
+                view=RankingUpdateView(ranking_vm)
+            )
+            # 詳細戦績機能
+            await safe_send_message(
+                rating_update_channel, 
+                "2デッキBO1単位での戦績を確認できます", 
+                view=DetailedRecordView()
+            )
+            logging.info("✅ Rating update channel setup completed")
+        
         # 戦績チャンネル（現在シーズン + 直近50戦）
         record_channel = bot.get_channel(RECORD_CHANNEL_ID)
         if record_channel:
             await safe_purge_channel(record_channel)
-            await safe_send_message(record_channel, "今シーズンの戦績と直近50戦を確認できます。", view=CurrentSeasonRecordView())
+            await safe_send_message(
+                record_channel, 
+                "今シーズンの戦績と直近50戦を確認できます。", 
+                view=CurrentSeasonRecordView()
+            )
             logging.info("✅ Record channel setup completed")
         
         # 過去戦績チャンネル（前作対応）
         past_record_channel = bot.get_channel(PAST_RECORD_CHANNEL_ID)
         if past_record_channel:
             await safe_purge_channel(past_record_channel)
-            await safe_send_message(past_record_channel, "前作の戦績を表示します。", view=PastSeasonRecordView())
+            await safe_send_message(
+                past_record_channel, 
+                "前作の戦績を表示します。", 
+                view=PastSeasonRecordView()
+            )
             logging.info("✅ Past record channel setup completed")
         
         # 注意: LAST_50_MATCHES_RECORD_CHANNEL_IDは使用しなくなりました
@@ -1106,7 +1168,6 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
         logging.error(f"❌ Error setting up Bot2 channels: {e}")
     
     return ranking_view
-
 async def setup_matchmaking_channel(channel, matchmaking_vm: MatchmakingViewModel):
     """マッチングチャンネルの設定"""
     view = MatchmakingView(matchmaking_vm)

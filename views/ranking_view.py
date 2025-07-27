@@ -261,7 +261,7 @@ class RankingUpdateView(View):
             current_season_name = season_model.get_current_season_name()
             
             embed = discord.Embed(
-                title=f"【{current_season_name or '現在'}】レーティングランキング（更新済み）", 
+                title=f"【{current_season_name or '現在'}】レーティングランキング", 
                 color=discord.Color.blue()
             )
             
@@ -295,7 +295,7 @@ class RankingUpdateView(View):
                 season_model = SeasonModel()
                 current_season_name = season_model.get_current_season_name()
                 embed = discord.Embed(
-                    title=f"【{current_season_name or '現在'}】レーティングランキング（更新済み・続き）", 
+                    title=f"【{current_season_name or '現在'}】レーティングランキング", 
                     color=discord.Color.blue()
                 )
         
