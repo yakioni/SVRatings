@@ -292,7 +292,7 @@ class PremiumModal(Modal):
             required=True
         )
         self.add_item(self.password_input)
-    
+
     async def callback(self, interaction: discord.Interaction):
         """Premium機能解放の処理"""
         password = self.password_input.value.strip()
@@ -310,21 +310,6 @@ class PremiumModal(Modal):
         try:
             from models.user import UserModel
             user_model = UserModel()
-            
-            # 現在のPremium残日数を取得
-            current_days = user_model.get_premium_days(user_id)
-            
-            # 既にPremium日数がある場合の処理
-            if current_days > 0:
-                confirm_view = PremiumExtendConfirmView(days, current_days)
-                await interaction.response.send_message(
-                    f"⚠️ あなたは既にPremium機能を利用中です（残り{current_days}日）。\n"
-                    f"新しい合言葉を使用すると{days}日が追加されます。\n"
-                    f"合計で{current_days + days}日になります。続行しますか？",
-                    view=confirm_view,
-                    ephemeral=True
-                )
-                return
             
             # Premiumロールを取得または作成
             premium_role = discord.utils.get(interaction.guild.roles, name=PREMIUM_ROLE_NAME)
@@ -360,7 +345,6 @@ class PremiumModal(Modal):
             await interaction.response.send_message(
                 f"🎉 **Premium機能が解放されました！**\n\n"
                 f"⏰ 追加期間: {period_text}\n"
-                f"📅 総残日数: {days}日\n"
                 f"✨ Premium機能をお楽しみください！",
                 ephemeral=True
             )
@@ -680,7 +664,25 @@ class PremiumButton(Button):
     async def callback(self, interaction: discord.Interaction):
         """Premium機能解放のコールバック"""
         try:
-            # モーダルを表示
+            from models.user import UserModel
+            user_model = UserModel()
+            
+            user_id = str(interaction.user.id)
+            
+            # 現在のPremium残日数を取得
+            current_days = user_model.get_premium_days(user_id)
+            
+            # Premium日数が1以上の場合は使用不可
+            if current_days > 0:
+                await interaction.response.send_message(
+                    f"⚠️ Premium機能利用中は新しい合言葉を使用できません。\n"
+                    f"現在の残日数: {current_days}日\n"
+                    f"期限切れ後に新しい合言葉をご利用ください。",
+                    ephemeral=True
+                )
+                return
+            
+            # Premium日数が0の場合のみモーダルを表示
             modal = PremiumModal()
             await interaction.response.send_modal(modal)
             
@@ -690,6 +692,7 @@ class PremiumButton(Button):
                 "❌ Premium機能の処理中にエラーが発生しました。",
                 ephemeral=True
             )
+
 
 class StayButton(Button):
     """Stay機能ボタン"""
