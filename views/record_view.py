@@ -1502,13 +1502,13 @@ class OpponentAnalysisClassSelect(Select):
                 )
                 return
             
-            # ソート
+            # ソート修正
             if self.sort_type == "wins":
-                # 勝利数順（多い順）
-                sorted_data = sorted(analysis_data, key=lambda x: x['opponent_wins'], reverse=True)
+                # 勝利数順（自分の勝利数で多い順）
+                sorted_data = sorted(analysis_data, key=lambda x: (x['my_wins'], x['win_rate']), reverse=True)
             else:  # rate
-                # 勝率順（高い順）
-                sorted_data = sorted(analysis_data, key=lambda x: x['win_rate'], reverse=True)
+                # 勝率順（高い順、同率時は勝利数で）
+                sorted_data = sorted(analysis_data, key=lambda x: (x['win_rate'], x['my_wins']), reverse=True)
             
             # 条件説明を作成
             if len(selected_classes) == 1:
@@ -1754,7 +1754,7 @@ class OpponentAnalysisClassSelect(Select):
         return match_model.safe_execute(_get_analysis_data) or []
     
     def create_analysis_embeds(self, analysis_data: List[Dict], class_desc: str, 
-                             period_desc: str, sort_desc: str) -> List[discord.Embed]:
+                            period_desc: str, sort_desc: str) -> List[discord.Embed]:
         """分析結果のEmbedを作成"""
         try:
             from config.settings import get_class_emoji, VALID_CLASSES
@@ -1778,7 +1778,7 @@ class OpponentAnalysisClassSelect(Select):
         
         # 単一クラス選択時と組み合わせ選択時で処理を分ける
         if "単体" in class_desc:
-            # 単一クラス選択時：7種類のクラス個別表示
+            # 単一クラス選択時：7種類のクラス個別表示（既存処理のまま）
             if not analysis_data:
                 embed = discord.Embed(
                     title=f"投げられたクラス分析 ({sort_desc})",
@@ -1828,7 +1828,7 @@ class OpponentAnalysisClassSelect(Select):
             return embeds
         
         else:
-            # 2つのクラス組み合わせ選択時：既存の処理
+            # 2つのクラス組み合わせ選択時：修正版
             from itertools import combinations
             
             # 全クラス組み合わせを生成
@@ -1837,8 +1837,8 @@ class OpponentAnalysisClassSelect(Select):
                 combo_key = tuple(sorted(combo))
                 all_combinations.append(combo_key)
             
-            # 完全なデータセットを作成（すべての組み合わせ × すべての選択クラス）
-            complete_data = []
+            # 組み合わせレベルでのデータを作成
+            combo_summary = {}
             
             # 既存データをマップに変換
             existing_data_map = {}
@@ -1848,40 +1848,56 @@ class OpponentAnalysisClassSelect(Select):
                 key = (combo_tuple, selected_class)
                 existing_data_map[key] = item
             
-            # 全組み合わせに対して完全なデータを作成
+            # 組み合わせごとの合計を計算
             for combo_tuple in all_combinations:
                 combo_str = f"{combo_tuple[0]} + {combo_tuple[1]}"
                 
-                # 組み合わせの合計戦数をチェック
-                combo_total_matches = 0
-                combo_data = []
+                # 組み合わせの合計データを計算
+                total_my_wins = 0
+                total_opponent_wins = 0
+                total_matches = 0
+                combo_class_data = []
                 
-                # 各組み合わせの2つのクラス選択を確実に作成
+                # 各クラス選択のデータを収集
                 for selected_class in combo_tuple:
                     key = (combo_tuple, selected_class)
                     
                     if key in existing_data_map:
-                        # 既存データがある場合
                         item_data = existing_data_map[key]
-                        combo_data.append(item_data)
-                        combo_total_matches += item_data['total_matches']
+                        total_my_wins += item_data['my_wins']
+                        total_opponent_wins += item_data['opponent_wins']
+                        total_matches += item_data['total_matches']
+                        combo_class_data.append(item_data)
                     else:
-                        # 既存データがない場合、0のデータを作成
-                        combo_data.append({
+                        # データがない場合は0データを作成
+                        zero_data = {
                             'opponent_class_combo': combo_str,
                             'opponent_selected_class': selected_class,
                             'total_matches': 0,
                             'opponent_wins': 0,
                             'my_wins': 0,
                             'win_rate': 0.0
-                        })
+                        }
+                        combo_class_data.append(zero_data)
                 
-                # 組み合わせ単位で対戦合計が0戦でない場合のみ追加
-                if combo_total_matches > 0:
-                    complete_data.extend(combo_data)
+                # 組み合わせに試合があった場合のみ追加
+                if total_matches > 0:
+                    combo_win_rate = (total_my_wins / total_matches) * 100
+                    
+                    # 各クラス選択を勝率順でソート
+                    combo_class_data.sort(key=lambda x: (x['win_rate'], x['my_wins']), reverse=True)
+                    
+                    combo_summary[combo_tuple] = {
+                        'combo_str': combo_str,
+                        'total_my_wins': total_my_wins,
+                        'total_opponent_wins': total_opponent_wins,
+                        'total_matches': total_matches,
+                        'combo_win_rate': combo_win_rate,
+                        'class_data': combo_class_data
+                    }
             
             # データが空の場合の処理
-            if not complete_data:
+            if not combo_summary:
                 embed = discord.Embed(
                     title=f"投げられたクラス分析 ({sort_desc})",
                     description=f"**分析対象:** {class_desc}\n**期間:** {period_desc}\n\n該当するデータがありませんでした。",
@@ -1889,18 +1905,21 @@ class OpponentAnalysisClassSelect(Select):
                 )
                 return [embed]
             
-            # ソート（元のソート基準を維持）
+            # 組み合わせをソート
+            combo_list = list(combo_summary.values())
             if sort_desc == "勝利数順":
-                complete_data.sort(key=lambda x: (x['opponent_wins'], x['win_rate']), reverse=True)
+                # 自分の勝利数順（多い順、同数時は勝率順）
+                combo_list.sort(key=lambda x: (x['total_my_wins'], x['combo_win_rate']), reverse=True)
             else:  # 勝率順
-                complete_data.sort(key=lambda x: (x['win_rate'], x['opponent_wins']), reverse=True)
+                # 勝率順（高い順、同率時は勝利数順）
+                combo_list.sort(key=lambda x: (x['combo_win_rate'], x['total_my_wins']), reverse=True)
             
-            # ページごとに処理（11組合せ = 22個のデータ per page）
-            items_per_page = 22  # 11組合せ × 2選択 = 22個
+            # ページごとに処理（6組合せ per page）
+            items_per_page = 6
             
-            for page_start in range(0, len(complete_data), items_per_page):
+            for page_start in range(0, len(combo_list), items_per_page):
                 page_num = (page_start // items_per_page) + 1
-                total_pages = (len(complete_data) + items_per_page - 1) // items_per_page
+                total_pages = (len(combo_list) + items_per_page - 1) // items_per_page
                 
                 embed = discord.Embed(
                     title=f"投げられたクラス分析 ({sort_desc}) - Page {page_num}/{total_pages}",
@@ -1909,51 +1928,38 @@ class OpponentAnalysisClassSelect(Select):
                 )
                 
                 # 現在のページのデータを取得
-                page_data = complete_data[page_start:page_start + items_per_page]
-                
-                # 組み合わせごとにグループ化
-                page_combo_groups = {}
-                for item in page_data:
-                    combo = item['opponent_class_combo']
-                    if combo not in page_combo_groups:
-                        page_combo_groups[combo] = []
-                    page_combo_groups[combo].append(item)
-                
-                # 組み合わせを名前順でソート
-                sorted_combos = sorted(page_combo_groups.keys())
+                page_combos = combo_list[page_start:page_start + items_per_page]
                 
                 # 各組み合わせを表示
-                for combo in sorted_combos:
-                    combo_items = page_combo_groups[combo]
+                for combo_data in page_combos:
+                    combo_str = combo_data['combo_str']
+                    total_my_wins = combo_data['total_my_wins']
+                    total_opponent_wins = combo_data['total_opponent_wins']
+                    combo_win_rate = combo_data['combo_win_rate']
+                    class_data = combo_data['class_data']
                     
                     # タイトル用の絵文字を組み合わせの順番で取得
-                    combo_parts = combo.split(' + ')
+                    combo_parts = combo_str.split(' + ')
                     title_emoji1 = get_class_emoji(combo_parts[0])
                     title_emoji2 = get_class_emoji(combo_parts[1])
                     
-                    # 組み合わせの合計戦績を計算
-                    combo_total_matches = sum(item['total_matches'] for item in combo_items)
-                    combo_total_my_wins = sum(item['my_wins'] for item in combo_items)
-                    combo_total_opponent_wins = sum(item['opponent_wins'] for item in combo_items)
-                    combo_win_rate = (combo_total_my_wins / combo_total_matches * 100) if combo_total_matches > 0 else 0
+                    # 組み合わせのタイトル
+                    combo_title = f"{title_emoji1} {combo_str} (合計：{total_my_wins}勝-{total_opponent_wins}敗 {combo_win_rate:.1f}%)"
                     
-                    field_value_parts = []
-                    for item in combo_items:
-                        selected_class = item['opponent_selected_class']
-                        total_matches = item['total_matches']
-                        opponent_wins = item['opponent_wins']
-                        my_wins = item['my_wins']
-                        win_rate = item['win_rate']
+                    # 各クラス選択の詳細
+                    class_details = []
+                    for class_item in class_data:
+                        selected_class = class_item['opponent_selected_class']
+                        my_wins = class_item['my_wins']
+                        opponent_wins = class_item['opponent_wins']
+                        win_rate = class_item['win_rate']
+                        
+                        class_details.append(f"{selected_class}選択: {my_wins}勝-{opponent_wins}敗 {win_rate:.1f}%")
                     
-                        # 「・」を使用してシンプルに表示
-                        field_value_parts.append(
-                            f"・**{selected_class}選択:** {my_wins}勝-{opponent_wins}敗 {win_rate:.1f}%"
-                        )
-                    
-                    field_value = "\n".join(field_value_parts)
+                    field_value = "・" + " ・".join(class_details)
                     
                     embed.add_field(
-                        name=f"{title_emoji1}{title_emoji2} {combo} (合計：{combo_total_my_wins}勝-{combo_total_opponent_wins}敗 {combo_win_rate:.1f}%)",
+                        name=combo_title,
                         value=field_value,
                         inline=False
                     )
@@ -1961,6 +1967,7 @@ class OpponentAnalysisClassSelect(Select):
                 embeds.append(embed)
             
             return embeds
+
 class OpponentAnalysisPaginatorView(View):
     def __init__(self, embeds: List[discord.Embed]):
         super().__init__(timeout=600)
