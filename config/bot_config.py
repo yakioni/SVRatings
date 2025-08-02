@@ -53,7 +53,7 @@ def create_bot_1():
                 command_channel = bot.get_channel(COMMAND_CHANNEL_ID)
                 if command_channel:
                     await command_channel.send(
-                        f"📅 月次処理完了: {reset_count}人のユーザーの名前変更権を復活させました。"
+                        f"月次処理完了: {reset_count}人のユーザーの名前変更権を復活させました。"
                     )
         except Exception as e:
             logging.error(f"Error in monthly_name_change_reset: {e}")
@@ -74,7 +74,7 @@ def create_bot_1():
         
         try:
             await bot.sync_commands()
-            logging.info("✅ Commands synced successfully")
+            logging.info("Commands synced successfully")
         except Exception as e:
             logging.error(f"❌ Failed to sync commands: {e}")
         
@@ -83,12 +83,12 @@ def create_bot_1():
             logging.error("❌ Database initialization failed for Bot1")
             return
         
-        logging.info("✅ Database initialization completed")
+        logging.info("Database initialization completed")
         
         # 月次タスクの開始
         if not monthly_name_change_reset.is_running():
             monthly_name_change_reset.start()
-            logging.info("✅ Monthly name change reset task started")
+            logging.info("Monthly name change reset task started")
         
         # マッチ作成コールバック関数を定義（on_ready内で定義）
         async def create_battle_thread(user1, user2):
@@ -107,7 +107,7 @@ def create_bot_1():
                     logging.error(f"❌ Failed to create battle thread for {user1.display_name} vs {user2.display_name}")
                     return
                 
-                logging.info(f"✅ Thread created successfully: {thread.name} (ID: {thread.id})")
+                logging.info(f"Thread created successfully: {thread.name} (ID: {thread.id})")
                 
                 # ユーザーをスレッドに追加
                 await safe_add_user_to_thread(thread, user1)
@@ -206,7 +206,7 @@ def create_bot_1():
 
     if not daily_premium_reduction.is_running():
         daily_premium_reduction.start()
-        logging.info("✅ Daily premium reduction task started")
+        logging.info("Daily premium reduction task started")
 
     @bot.event
     async def on_member_join(member: discord.Member):
@@ -520,9 +520,9 @@ def create_bot_1():
         queue_status = matchmaking_vm.get_waiting_users()
         
         # 詳細情報を取得
-        callback_status = "✅ SET" if matchmaking_vm.match_creation_callback else "❌ NOT SET"
-        background_task_status = "✅ RUNNING" if matchmaking_vm.background_task and not matchmaking_vm.background_task.done() else "❌ NOT RUNNING"
-        processing_task_status = "✅ RUNNING" if matchmaking_vm.processing_task and not matchmaking_vm.processing_task.done() else "❌ NOT RUNNING"
+        callback_status = "SET" if matchmaking_vm.match_creation_callback else "❌ NOT SET"
+        background_task_status = "RUNNING" if matchmaking_vm.background_task and not matchmaking_vm.background_task.done() else "❌ NOT RUNNING"
+        processing_task_status = "RUNNING" if matchmaking_vm.processing_task and not matchmaking_vm.processing_task.done() else "❌ NOT RUNNING"
         
         from config.settings import MAX_RATING_DIFF_FOR_MATCH
         debug_info = (
@@ -570,7 +570,7 @@ def create_bot_1():
         try:
             matches = await matchmaking_vm.find_and_create_matches()
             if matches:
-                result_msg = f"✅ Found {len(matches)} matches:\n"
+                result_msg = f"Found {len(matches)} matches:\n"
                 for user1, user2 in matches:
                     result_msg += f"- {user1.display_name} vs {user2.display_name}\n"
                 
@@ -646,7 +646,7 @@ def create_bot_1():
                 # 全ユーザーをリセット
                 reset_count = user_model.reset_users_for_new_season()
                 
-                await ctx.send(f"シーズン '{ended_season['season_name']}' が終了しました。{reset_count}人のユーザーをリセットしました。")
+                await ctx.send(f"シーズン '{ended_season['season_name']}' が終了しました。参加人数は{reset_count}人でした。")
                 
                 # マッチングボタンの削除
                 matching_channel = bot.get_channel(MATCHING_CHANNEL_ID)
@@ -673,7 +673,7 @@ def create_bot_1():
         try:
             password_manager.set_password(30, password.strip())
             await ctx.respond(
-                f"✅ 1か月用Premium合言葉を「**{password.strip()}**」に設定しました。",
+                f"1か月用Premium合言葉を「**{password.strip()}**」に設定しました。",
                 ephemeral=True
             )
             logging.info(f"Admin {ctx.user.id} set 1-month premium password: {password.strip()}")
@@ -696,7 +696,7 @@ def create_bot_1():
         try:
             password_manager.set_password(180, password.strip())  # 6か月 = 180日
             await ctx.respond(
-                f"✅ 6か月用Premium合言葉を「**{password.strip()}**」に設定しました。",
+                f"6か月用Premium合言葉を「**{password.strip()}**」に設定しました。",
                 ephemeral=True
             )
             logging.info(f"Admin {ctx.user.id} set 6-month premium password: {password.strip()}")
@@ -754,8 +754,8 @@ def create_bot_1():
                 if premium_days > 0:
                     status_msg = (
                         f"**{user.display_name} のPremium状態:**\n"
-                        f"✅ Premium ユーザー\n"
-                        f"📅 残り日数: {premium_days}日"
+                        f"Premium ユーザー\n"
+                        f"残り日数: {premium_days}日"
                     )
                 else:
                     status_msg = f"**{user.display_name} のPremium状態:**\n❌ 非Premium ユーザー"
@@ -767,10 +767,10 @@ def create_bot_1():
                 
                 status_msg = (
                     f"**Premium機能 全体統計:**\n"
-                    f"✨ 現在のPremiumユーザー: {stats['total']}人\n"
-                    f"⚠️ 1週間以内期限切れ: {stats['expiring_soon']}人\n"
-                    f"📅 1週間〜1か月: {stats['monthly']}人\n"
-                    f"🔥 1か月以上: {stats['long_term']}人"
+                    f"現在のPremiumユーザー: {stats['total']}人\n"
+                    f"1週間以内期限切れ: {stats['expiring_soon']}人\n"
+                    f"1週間〜1か月: {stats['monthly']}人\n"
+                    f"1か月以上: {stats['long_term']}人"
                 )
                 
                 await ctx.respond(status_msg, ephemeral=True)
@@ -812,9 +812,9 @@ def create_bot_1():
             total_days = user_model.get_premium_days(user_id)
             
             await ctx.respond(
-                f"✅ **{user.display_name}** にPremium機能を付与しました。\n"
-                f"📅 追加日数: {days}日\n"
-                f"🔢 総残日数: {total_days}日",
+                f"**{user.display_name}** にPremium機能を付与しました。\n"
+                f"追加日数: {days}日\n"
+                f"総残日数: {total_days}日",
                 ephemeral=True
             )
             
@@ -856,8 +856,8 @@ def create_bot_1():
             await remove_role(user, PREMIUM_ROLE_NAME)
             
             await ctx.respond(
-                f"✅ **{user.display_name}** のPremium機能を取り消しました。\n"
-                f"📅 取り消された日数: {premium_days}日",
+                f"**{user.display_name}** のPremium機能を取り消しました。\n"
+                f"取り消された日数: {premium_days}日",
                 ephemeral=True
             )
             
@@ -903,8 +903,8 @@ def create_bot_1():
                 status_text = "Premium機能を無効化"
             
             await ctx.respond(
-                f"✅ **{user.display_name}** の{status_text}しました。\n"
-                f"📅 残日数: {days}日",
+                f"**{user.display_name}** の{status_text}しました。\n"
+                f"残日数: {days}日",
                 ephemeral=True
             )
             
@@ -913,46 +913,6 @@ def create_bot_1():
         except Exception as e:
             logging.error(f"Error setting premium days for user {user_id}: {e}")
             await ctx.respond("❌ Premium日数設定中にエラーが発生しました。", ephemeral=True)
-    
-    # Premium機能利用例コマンド（新規追加）
-    @bot.slash_command(
-        name="premium_feature_example",
-        description="Premium機能の例（Premium限定）"
-    )
-    async def premium_feature_example(ctx: discord.ApplicationContext):
-        """Premium機能の使用例"""
-        from models.user import UserModel
-        
-        user_id = str(ctx.user.id)
-        user_model = UserModel()
-        
-        try:
-            premium_days = user_model.get_premium_days(user_id)
-            
-            if premium_days <= 0:
-                await ctx.respond(
-                    "❌ この機能はPremiumユーザー限定です。\n"
-                    "プロフィールボタンから「Premium機能を解放する」をお試しください。",
-                    ephemeral=True
-                )
-                return
-            
-            await ctx.respond(
-                f"✨ **Premium機能の例**\n\n"
-                f"🎉 Premium機能をご利用いただき、ありがとうございます！\n"
-                f"📅 あなたのPremium残日数: {premium_days}日\n\n"
-                f"🔮 この機能では、例えば以下のようなことが可能です：\n"
-                f"• 詳細な統計情報の表示\n"
-                f"• 特別なランキング表示\n"
-                f"• 高度な戦績分析\n"
-                f"• カスタマイズ機能\n\n"
-                f"💡 実際の機能は用途に応じて実装してください。",
-                ephemeral=True
-            )
-        except Exception as e:
-            logging.error(f"Error in premium_feature_example for user {user_id}: {e}")
-            await ctx.respond("❌ Premium機能の実行中にエラーが発生しました。", ephemeral=True)
-
 
     return bot
 
@@ -969,7 +929,7 @@ async def setup_bot1_channels(bot, matchmaking_vm: MatchmakingViewModel):
                 "**SV Ratingsへようこそ！**\n以下のボタンを押してユーザー登録を行ってください。登録したIDは変更できません。ご注意ください。",
                 view=RegisterView()
             )
-            logging.info("✅ Welcome channel setup completed")
+            logging.info("Welcome channel setup completed")
         
         # プロフィールチャンネル
         profile_channel = bot.get_channel(PROFILE_CHANNEL_ID)
@@ -980,7 +940,7 @@ async def setup_bot1_channels(bot, matchmaking_vm: MatchmakingViewModel):
             await safe_send_message(profile_channel, view=StayFunctionView())
             await safe_send_message(profile_channel, view=NameChangeView())
             await safe_send_message(profile_channel, view=PremiumView())
-            logging.info("✅ Profile channel setup completed")
+            logging.info("Profile channel setup completed")
         
         # マッチングチャンネル
         matching_channel = bot.get_channel(MATCHING_CHANNEL_ID)
@@ -988,7 +948,7 @@ async def setup_bot1_channels(bot, matchmaking_vm: MatchmakingViewModel):
             await safe_purge_channel(matching_channel)
             await safe_send_message(matching_channel, "使用するクラスを選択してください。", view=ClassSelectView())
             await setup_matchmaking_channel(matching_channel, matchmaking_vm)
-            logging.info("✅ Matching channel setup completed")
+            logging.info("Matching channel setup completed")
         
     except Exception as e:
         logging.error(f"❌ Error setting up Bot1 channels: {e}")
@@ -1017,7 +977,7 @@ def create_bot_2():
         
         try:
             await bot.sync_commands()
-            logging.info("✅ Bot2 commands synced successfully")
+            logging.info("Bot2 commands synced successfully")
         except Exception as e:
             logging.error(f"❌ Failed to sync Bot2 commands: {e}")
         
@@ -1082,7 +1042,7 @@ def create_bot_2():
                 ranking_channel = bot.get_channel(RANKING_CHANNEL_ID)
                 if ranking_channel:
                     await global_ranking_view.show_initial_rating_ranking(ranking_channel)
-                    logging.info("✅ Rating ranking updated automatically")
+                    logging.info("Rating ranking updated automatically")
                     
         except Exception as e:
             logging.error(f"Error in update_stats_periodically: {e}")
@@ -1105,10 +1065,10 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
             # 説明メッセージとボタンを先に表示
             await safe_send_message(
                 ranking_channel,
-                "現在のランキングを表示します。",
+                "現在のランキングを表示します。\nレーティングランキングは1時間ごとに更新されます。\n",
                 view=ranking_view
             )
-            logging.info("✅ Ranking channel setup completed")
+            logging.info("Ranking channel setup completed")
         
         # 過去ランキングチャンネル（過去シーズン）
         past_ranking_channel = bot.get_channel(PAST_RANKING_CHANNEL_ID)
@@ -1119,7 +1079,7 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
                 "過去シーズンのランキングを表示します。", 
                 view=PastRankingButtonView(ranking_vm)
             )
-            logging.info("✅ Past ranking channel setup completed")
+            logging.info("Past ranking channel setup completed")
         
         # ランキング更新チャンネル（ランキング更新 + 詳細戦績）
         rating_update_channel = bot.get_channel(RATING_UPDATE_CHANNEL_ID)
@@ -1137,7 +1097,7 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
                 "2デッキBO1単位での戦績を確認できます", 
                 view=DetailedRecordView()
             )
-            logging.info("✅ Rating update channel setup completed")
+            logging.info("Rating update channel setup completed")
         
         # 戦績チャンネル（現在シーズン + 直近50戦）
         record_channel = bot.get_channel(RECORD_CHANNEL_ID)
@@ -1148,7 +1108,7 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
                 "今シーズンの戦績と直近50戦を確認できます。", 
                 view=CurrentSeasonRecordView()
             )
-            logging.info("✅ Record channel setup completed")
+            logging.info("Record channel setup completed")
         
         # 過去戦績チャンネル（前作対応）
         past_record_channel = bot.get_channel(PAST_RECORD_CHANNEL_ID)
@@ -1159,7 +1119,7 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
                 "前作の戦績を表示します。", 
                 view=PastSeasonRecordView()
             )
-            logging.info("✅ Past record channel setup completed")
+            logging.info("Past record channel setup completed")
         
         # 注意: LAST_50_MATCHES_RECORD_CHANNEL_IDは使用しなくなりました
         # 直近50戦機能はrecord_channelに統合されました

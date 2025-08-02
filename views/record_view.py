@@ -450,8 +450,6 @@ class MatchOpponentButton(Button):
             self.logger.error(f"Error showing opponent history: {e}")
             await interaction.followup.send("対戦履歴の取得中にエラーが発生しました。", ephemeral=True)
 
-# 対戦履歴ページネーション用のViewクラス（UserVsUserHistoryPaginatorViewを簡略化）
-
 class MatchHistoryPaginatorView(View):
     """対戦履歴のページネーションView"""
     
@@ -486,35 +484,6 @@ class MatchHistoryPaginatorView(View):
                 item.disabled = True
         except Exception as e:
             self.logger.error(f"Error in on_timeout: {e}")
-
-class DetailedRecordView(View):
-    """詳細戦績表示View（レーティング更新チャンネル用）"""
-    
-    def __init__(self):
-        super().__init__(timeout=None)
-        
-        # 詳細な戦績ボタン
-        detailed_record_button = Button(label="詳細な戦績", style=discord.ButtonStyle.success)
-        async def detailed_record_callback(interaction):
-            await self.show_detailed_season_select(interaction)
-        detailed_record_button.callback = detailed_record_callback
-        self.add_item(detailed_record_button)
-    
-    async def show_detailed_season_select(self, interaction: discord.Interaction):
-        """詳細戦績のシーズン選択を表示"""
-        user_model = UserModel()
-        user = user_model.get_user_by_discord_id(str(interaction.user.id))
-        
-        if not user:
-            await interaction.response.send_message("ユーザーが見つかりません。", ephemeral=True)
-            return
-        
-        # 詳細戦績用のシーズン選択を表示
-        await interaction.response.send_message(
-            content="詳細戦績のシーズンを選択してください:", 
-            view=DetailedSeasonSelectView(), 
-            ephemeral=True
-        )
 
 class DetailedMatchHistoryView(View):
     """詳細な全対戦履歴表示View（レーティング更新チャンネル用）"""
@@ -977,10 +946,10 @@ class RecordClassSelect(Select):
         super().__init__(
             placeholder="クラスを選択してください...", 
             min_values=1, 
-            max_values=1,  # 1つのみ選択可能に変更
+            max_values=1, 
             options=options
         )
-    
+
     async def callback(self, interaction: discord.Interaction):
         """クラス選択のコールバック"""
         selected_class = self.values[0]
@@ -988,26 +957,24 @@ class RecordClassSelect(Select):
         
         # インタラクションのレスポンスを一度行う
         await interaction.response.defer(ephemeral=True)
-        
+
         try:
             # RecordViewModelを遅延インポート
             from viewmodels.record_vm import RecordViewModel
             record_vm = RecordViewModel()
-            
+
             if selected_class == "all_classes":
                 if self.season_id:
                     await record_vm.show_season_stats(interaction, user_id, self.season_id)
                 else:
                     await record_vm.show_all_time_stats(interaction, user_id)
             else:
-                # 単一クラスを選択した場合
                 await record_vm.show_class_stats(interaction, user_id, selected_class, self.season_id)
-        
+
         except Exception as e:
             self.logger.error(f"Error in class selection callback: {e}")
             await interaction.followup.send("エラーが発生しました。", ephemeral=True)
-        
-        # インタラクションメッセージを削除する
+
         try:
             await interaction.delete_original_response()
         except discord.errors.NotFound:
@@ -1015,45 +982,43 @@ class RecordClassSelect(Select):
 
 class PastSeasonRecordView(View):
     """過去シーズンの戦績表示View"""
-    
+
     def __init__(self):
         super().__init__(timeout=None)
         button = Button(label="過去のシーズン", style=discord.ButtonStyle.secondary)
-        
+
         async def button_callback(interaction):
             await self.show_season_select(interaction)
-        
+
         button.callback = button_callback
         self.add_item(button)
-    
+
     async def show_season_select(self, interaction: discord.Interaction):
         """シーズン選択を表示"""
         season_model = SeasonModel()
         seasons = season_model.get_past_seasons()
-        
+
         options = [
             discord.SelectOption(label="全シーズン", value="all")
         ]
-        
+
         used_values = set()
         for season in seasons:
             value = str(season['id'])
             if value in used_values:
-                # 重複を避けるためにユニークな値を生成
                 value = f"{season['id']}_{season['season_name']}"
             options.append(discord.SelectOption(label=season['season_name'], value=value))
             used_values.add(value)
-        
+
         select = Select(placeholder="シーズンを選択してください...", options=options)
-        
+
         async def select_callback(select_interaction):
             if not select_interaction.response.is_done():
                 await select_interaction.response.defer(ephemeral=True)
-            
+
             selected_season_id = select_interaction.data['values'][0]
-            
+
             if selected_season_id == "all":
-                # 全シーズンを選択した場合
                 await select_interaction.followup.send(
                     content="クラスを選択してください:", 
                     view=RecordClassSelectView(season_id=None),  # 修正: RecordClassSelectViewを使用
@@ -1067,12 +1032,10 @@ class PastSeasonRecordView(View):
                 if not user:
                     await select_interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
                     return
-                
-                # ユーザーが選択したシーズンに参加しているか確認
+
                 season_model = SeasonModel()
                 user_record = season_model.get_user_season_record(user['id'], selected_season_id)
-                
-                # user_recordが存在するかどうかのみチェック（属性にはアクセスしない）
+
                 if user_record is None:
                     message = await select_interaction.followup.send("未参加です。", ephemeral=True)
                     await asyncio.sleep(10)
@@ -1081,20 +1044,19 @@ class PastSeasonRecordView(View):
                     except discord.errors.NotFound:
                         pass
                     return
-                
-                # ユーザーがシーズンに参加している場合、クラスを選択させる
+
                 await select_interaction.followup.send(
                     content="クラスを選択してください:", 
                     view=RecordClassSelectView(season_id=selected_season_id),  # 修正: RecordClassSelectViewを使用
                     ephemeral=True
                 )
-        
+
         select.callback = select_callback
         view = View()
         view.add_item(select)
-        
+
         await interaction.response.send_message("シーズンを選択してください:", view=view, ephemeral=True)
-        
+
         await asyncio.sleep(15)
         try:
             await interaction.delete_original_response()
@@ -1103,43 +1065,43 @@ class PastSeasonRecordView(View):
 
 class Last50RecordView(View):
     """直近50戦の戦績表示View"""
-    
+
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(Last50RecordButton())
 
 class Last50RecordButton(Button):
     """直近50戦戦績表示ボタン"""
-    
+
     def __init__(self):
         super().__init__(label="直近50戦の戦績", style=discord.ButtonStyle.primary)
         self.logger = logging.getLogger(self.__class__.__name__)
-    
+
     async def callback(self, interaction: discord.Interaction):
         """直近50戦戦績表示のコールバック"""
         try:
             await interaction.response.defer(ephemeral=True)
-            
+
             # MatchModelを使用して直近50戦のデータを取得
             from models.match import MatchModel
             from models.user import UserModel
-            
+
             user_model = UserModel()
             match_model = MatchModel()
-            
+
             # ユーザー情報を取得
             user_data = user_model.get_user_by_discord_id(str(interaction.user.id))
             if not user_data:
                 await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
                 return
-            
+
             # user_dataが辞書かオブジェクトかを判定して適切にアクセス
             def get_attr(data, attr_name, default=None):
                 if isinstance(data, dict):
                     return data.get(attr_name, default)
                 else:
                     return getattr(data, attr_name, default)
-            
+
             user_id = get_attr(user_data, 'id')
             user_name = get_attr(user_data, 'user_name')
             
@@ -1149,8 +1111,8 @@ class Last50RecordButton(Button):
             # 完了した試合のみフィルタリング
             completed_matches = []
             for match in matches:
-                if (match.get('winner_user_id') is not None and 
-                    match.get('after_user1_rating') is not None and 
+                if (match.get('winner_user_id') is not None and
+                    match.get('after_user1_rating') is not None and
                     match.get('after_user2_rating') is not None):
                     completed_matches.append(match)
             
@@ -1979,7 +1941,6 @@ class OpponentAnalysisPaginatorView(View):
             self.logger.error(f"Error in on_timeout: {e}")
 
 
-# DetailedRecordView クラスに追加するメソッド
 class DetailedRecordView(View):
     """詳細戦績表示View（レーティング更新チャンネル用）"""
     

@@ -165,46 +165,46 @@ class UserRegistrationModal(Modal):
                 try:
                     await interaction.user.edit(nick=username)
                     await interaction.response.send_message(
-                        f"✅ **ユーザー {username} の登録が完了しました。**\n\n"
-                        f"📝 名前変更権: 1回利用可能\n"
-                        f"💡 名前変更は プロフィールチャンネルの「名前変更」ボタンで行えます。\n"
-                        f"⚠️ 権限は使用後、毎月1日に復活します。\n"
-                        f"🎮 サーバーニックネームも更新されました。",
+                        f"**ユーザー {username} の登録が完了しました。**\n\n"
+                        f"名前変更権: 1回利用可能\n"
+                        f"名前変更は プロフィールチャンネルの「名前変更」ボタンで行えます。\n"
+                        f"権限は使用後、毎月1日に復活します。\n"
+                        f"サーバーニックネームも更新されました。",
                         ephemeral=True
                     )
                 except discord.Forbidden:
                     await interaction.response.send_message(
-                        f"✅ **ユーザー {username} の登録が完了しました。**\n\n"
-                        f"📝 名前変更権: 1回利用可能\n"
-                        f"💡 名前変更は プロフィールチャンネルの「名前変更」ボタンで行えます。\n"
-                        f"⚠️ 権限は使用後、毎月1日に復活します。\n"
-                        f"🔧 サーバーニックネームの変更に失敗しました（権限不足）。",
+                        f"**ユーザー {username} の登録が完了しました。**\n\n"
+                        f"名前変更権: 1回利用可能\n"
+                        f"名前変更は プロフィールチャンネルの「名前変更」ボタンで行えます。\n"
+                        f"権限は使用後、毎月1日に復活します。\n"
+                        f"サーバーニックネームの変更に失敗しました（権限不足）。",
                         ephemeral=True
                     )
                 except Exception as e:
                     self.logger.error(f"Error changing nickname for user {user_id}: {e}")
                     await interaction.response.send_message(
-                        f"✅ **ユーザー {username} の登録が完了しました。**\n\n"
-                        f"📝 名前変更権: 1回利用可能\n"
-                        f"💡 名前変更は プロフィールチャンネルの「名前変更」ボタンで行えます。\n"
-                        f"⚠️ 権限は使用後、毎月1日に復活します。\n"
-                        f"🔧 サーバーニックネームの変更でエラーが発生しました。",
+                        f"**ユーザー {username} の登録が完了しました。**\n\n"
+                        f"名前変更権: 1回利用可能\n"
+                        f"名前変更は プロフィールチャンネルの「名前変更」ボタンで行えます。\n"
+                        f"権限は使用後、毎月1日に復活します。\n"
+                        f"サーバーニックネームの変更でエラーが発生しました。",
                         ephemeral=True
                     )
                 
                 self.logger.info(f"User {username} (ID: {user_id}) registered successfully via modal")
             else:
                 await interaction.response.send_message(
-                    "❌ 登録に失敗しました。管理者にお問い合わせください。", 
+                    "登録に失敗しました。管理者にお問い合わせください。", 
                     ephemeral=True
                 )
         
         except ValueError as e:
-            await interaction.response.send_message(f"❌ 登録エラー: {str(e)}", ephemeral=True)
+            await interaction.response.send_message(f"登録エラー: {str(e)}", ephemeral=True)
             self.logger.error(f"Registration error for user {user_id}: {e}")
         except Exception as e:
             await interaction.response.send_message(
-                "❌ 予期しないエラーが発生しました。管理者にお問い合わせください。", 
+                "予期しないエラーが発生しました。管理者にお問い合わせください。", 
                 ephemeral=True
             )
             self.logger.error(f"Unexpected error during registration for user {user_id}: {e}")
@@ -248,34 +248,34 @@ class NameChangeModal(Modal):
                 try:
                     await interaction.user.edit(nick=new_name)
                     await interaction.response.send_message(
-                        f"✅ 名前を **{new_name}** に変更しました。\n"
-                        f"🎮 サーバーニックネームも更新されました。\n"
-                        f"📅 名前変更権を使用したため、次回は来月1日から利用可能です。",
+                        f"名前を **{new_name}** に変更しました。\n"
+                        f"サーバーニックネームも更新されました。\n"
+                        f"名前変更権を使用したため、次回は来月1日から利用可能です。",
                         ephemeral=True
                     )
                     self.logger.info(f"User {interaction.user.id} changed name to {new_name}")
                 except discord.Forbidden:
                     await interaction.response.send_message(
-                        f"✅ データベースの名前を **{new_name}** に変更しました。\n"
-                        f"⚠️ サーバーニックネームの変更に失敗しました（権限不足）。\n"
-                        f"📅 名前変更権を使用したため、次回は来月1日から利用可能です。",
+                        f"データベースの名前を **{new_name}** に変更しました。\n"
+                        f"サーバーニックネームの変更に失敗しました（権限不足）。\n"
+                        f"名前変更権を使用したため、次回は来月1日から利用可能です。",
                         ephemeral=True
                     )
                 except Exception as e:
                     self.logger.error(f"Error changing nickname for user {interaction.user.id}: {e}")
                     await interaction.response.send_message(
-                        f"✅ データベースの名前を **{new_name}** に変更しました。\n"
-                        f"⚠️ サーバーニックネームの変更でエラーが発生しました。\n"
-                        f"📅 名前変更権を使用したため、次回は来月1日から利用可能です。",
+                        f"データベースの名前を **{new_name}** に変更しました。\n"
+                        f"サーバーニックネームの変更でエラーが発生しました。\n"
+                        f"名前変更権を使用したため、次回は来月1日から利用可能です。",
                         ephemeral=True
                     )
             else:
-                await interaction.response.send_message(f"❌ {result['message']}", ephemeral=True)
+                await interaction.response.send_message(f"{result['message']}", ephemeral=True)
                 
         except Exception as e:
             self.logger.error(f"Error in name change for user {interaction.user.id}: {e}")
             await interaction.response.send_message(
-                "❌ 名前変更中にエラーが発生しました。管理者にお問い合わせください。",
+                "名前変更中にエラーが発生しました。管理者にお問い合わせください。",
                 ephemeral=True
             )
 
@@ -302,7 +302,7 @@ class PremiumModal(Modal):
         days = password_manager.get_days_for_password(password)
         if days is None:
             await interaction.response.send_message(
-                "❌ 合言葉が正しくありません。", 
+                "合言葉が正しくありません。", 
                 ephemeral=True
             )
             return
@@ -323,7 +323,7 @@ class PremiumModal(Modal):
                     self.logger.info(f"Created premium role in guild {interaction.guild.id}")
                 except discord.Forbidden:
                     await interaction.response.send_message(
-                        "❌ Premiumロールの作成に失敗しました。管理者にお問い合わせください。",
+                        "Premiumロールの作成に失敗しました。管理者にお問い合わせください。",
                         ephemeral=True
                     )
                     return
@@ -332,7 +332,7 @@ class PremiumModal(Modal):
             success = user_model.add_premium_days(user_id, days)
             if not success:
                 await interaction.response.send_message(
-                    "❌ Premium機能の追加に失敗しました。", 
+                    "Premium機能の追加に失敗しました。", 
                     ephemeral=True
                 )
                 return
@@ -343,9 +343,8 @@ class PremiumModal(Modal):
             # 成功メッセージ
             period_text = f"{days}日間"
             await interaction.response.send_message(
-                f"🎉 **Premium機能が解放されました！**\n\n"
-                f"⏰ 追加期間: {period_text}\n"
-                f"✨ Premium機能をお楽しみください！",
+                f"**Premium機能が解放されました！**\n\n"
+                f"解放期間: {period_text}\n",
                 ephemeral=True
             )
             
@@ -354,7 +353,7 @@ class PremiumModal(Modal):
         except Exception as e:
             self.logger.error(f"Error in premium activation for user {user_id}: {e}")
             await interaction.response.send_message(
-                "❌ Premium機能の解放中にエラーが発生しました。管理者にお問い合わせください。",
+                "Premium機能の解放中にエラーが発生しました。管理者にお問い合わせください。",
                 ephemeral=True
             )
 
@@ -380,7 +379,7 @@ class PremiumExtendConfirmView(View):
             success = user_model.add_premium_days(user_id, self.add_days)
             if not success:
                 await interaction.response.edit_message(
-                    content="❌ Premium機能の追加に失敗しました。", 
+                    content="Premium機能の追加に失敗しました。", 
                     view=None
                 )
                 return
@@ -388,8 +387,8 @@ class PremiumExtendConfirmView(View):
             total_days = self.current_days + self.add_days
             
             await interaction.response.edit_message(
-                content=f"✅ Premium期間を{self.add_days}日延長しました！\n"
-                        f"📅 総残日数: {total_days}日",
+                content=f"Premium期間を{self.add_days}日延長しました！\n"
+                        f"総残日数: {total_days}日",
                 view=None
             )
             
@@ -398,7 +397,7 @@ class PremiumExtendConfirmView(View):
         except Exception as e:
             self.logger.error(f"Error extending premium for user {interaction.user.id}: {e}")
             await interaction.response.edit_message(
-                content="❌ Premium期間延長中にエラーが発生しました。",
+                content="Premium期間延長中にエラーが発生しました。",
                 view=None
             )
     
@@ -459,7 +458,7 @@ class NameChangeButton(Button):
             
             # 名前変更権の確認
             if not user.get('name_change_available', True):
-                await interaction.response.send_message("❌ 名前変更権は来月1日まで利用できません。", ephemeral=True)
+                await interaction.response.send_message("名前変更権は来月1日まで利用できません。", ephemeral=True)
                 return
             
             # モーダルを表示
@@ -563,14 +562,14 @@ class ProfileButton(Button):
                     rank = "未参加です"
                 
                 # 名前変更権の状態
-                name_change_status = "✅ 利用可能" if user_instance.get('name_change_available', True) else "❌ 使用済み（来月1日復活）"
+                name_change_status = "利用可能" if user_instance.get('name_change_available', True) else "使用済み（来月1日復活）"
                 
                 # Premium状態の確認
                 premium_days = user_model.get_premium_days(user_id)
                 if premium_days > 0:
                     premium_status = f"✨ Premium（残り{premium_days}日）"
                 else:
-                    premium_status = "❌ 未解放"
+                    premium_status = "未解放"
                 
                 # プロフィールメッセージの作成
                 profile_message = (
@@ -657,7 +656,6 @@ class PremiumButton(Button):
         super().__init__(
             label="Premium機能を解放する", 
             style=discord.ButtonStyle.secondary,
-            emoji="✨"
         )
         self.logger = logging.getLogger(self.__class__.__name__)
     
@@ -675,7 +673,7 @@ class PremiumButton(Button):
             # Premium日数が1以上の場合は使用不可
             if current_days > 0:
                 await interaction.response.send_message(
-                    f"⚠️ Premium機能利用中は新しい合言葉を使用できません。\n"
+                    f"Premium機能利用中は新しい合言葉を使用できません。\n"
                     f"現在の残日数: {current_days}日\n"
                     f"期限切れ後に新しい合言葉をご利用ください。",
                     ephemeral=True
@@ -689,7 +687,7 @@ class PremiumButton(Button):
         except Exception as e:
             self.logger.error(f"Error in premium button callback: {e}")
             await interaction.response.send_message(
-                "❌ Premium機能の処理中にエラーが発生しました。",
+                "Premium機能の処理中にエラーが発生しました。",
                 ephemeral=True
             )
 
