@@ -33,7 +33,6 @@ class CurrentSeasonRecordView(View):
         user_model = UserModel()
         user = user_model.get_user_by_discord_id(str(interaction.user.id))
         
-        # latest_season_matched が False なら "未参加です" と返って終了
         if user and not user['latest_season_matched']:
             await interaction.response.send_message("未参加です", ephemeral=True)
             return
@@ -42,7 +41,6 @@ class CurrentSeasonRecordView(View):
         season = season_model.get_current_season()
         
         if season:
-            # 戦績用のClassSelectViewを使用（名前を変更して衝突を避ける）
             await interaction.response.send_message(
                 content="クラスを選択してください：", 
                 view=RecordClassSelectView(season_id=season.id), 
@@ -52,7 +50,6 @@ class CurrentSeasonRecordView(View):
             await interaction.response.send_message("シーズンが見つかりません。", ephemeral=True)
     
     async def show_last50_matches(self, interaction: discord.Interaction):
-        """直近50戦を表示（各戦にボタン付き）"""
         try:
             await interaction.response.defer(ephemeral=True)
             
@@ -99,7 +96,6 @@ class CurrentSeasonRecordView(View):
     
     async def display_matches_page(self, interaction: discord.Interaction, matches: List[dict], 
                                   page: int, user_data: dict):
-        """試合のページを表示（各戦にボタン付き）"""
         user_model = UserModel()
         
         def get_attr(data, attr_name, default=None):
@@ -130,7 +126,6 @@ class CurrentSeasonRecordView(View):
         
         # 各試合の情報を表示
         for i, match in enumerate(page_matches):
-            # 対戦相手情報を取得
             if match['user1_id'] == user_id:
                 opponent_data = user_model.get_user_by_id(match['user2_id'])
                 user_rating_change = match.get('user1_rating_change', 0)
@@ -200,7 +195,6 @@ class CurrentSeasonRecordView(View):
             await interaction.edit_original_response(embed=embed, view=view)
 
 class Last50MatchesView(View):
-    """直近50戦表示View（ページネーション + マッチボタン）"""
     
     def __init__(self, all_matches: List[dict], current_page: int, user_data: dict, page_matches: List[dict]):
         super().__init__(timeout=600)
@@ -252,7 +246,6 @@ class Last50MatchesView(View):
             await view.display_matches_page(interaction, self.all_matches, self.current_page + 1, self.user_data)
 
 class MatchOpponentButton(Button):
-    """各試合の対戦相手ボタン"""
     
     def __init__(self, label: str, match_data: dict, user_data: dict, row: int):
         super().__init__(label=label, style=discord.ButtonStyle.primary, row=row)
@@ -261,7 +254,6 @@ class MatchOpponentButton(Button):
         self.logger = logging.getLogger(self.__class__.__name__)
     
     async def callback(self, interaction: discord.Interaction):
-        """対戦相手との全対戦履歴を表示（成績と履歴を同時表示）"""
         try:
             await interaction.response.defer(ephemeral=True)
             
@@ -351,15 +343,13 @@ class MatchOpponentButton(Button):
             # 対戦履歴をEmbedで表示
             embeds = []
             current_embed = None
-            matches_per_embed = 8  # 詳細情報があるので少なめに設定
+            matches_per_embed = 8
             
             for i, match in enumerate(completed_matches):
-                # 8試合ごとに新しいEmbedを作成
                 if i % matches_per_embed == 0:
                     page_num = i // matches_per_embed + 1
                     total_pages = (len(completed_matches) + matches_per_embed - 1) // matches_per_embed
                     
-                    # タイトルに対戦成績も含める
                     description = f"{user_wins}勝{opponent_wins}敗(勝率{user_win_rate:.0f}%) | Page {page_num}/{total_pages}"
                     
                     current_embed = discord.Embed(
@@ -451,7 +441,6 @@ class MatchOpponentButton(Button):
             await interaction.followup.send("対戦履歴の取得中にエラーが発生しました。", ephemeral=True)
 
 class MatchHistoryPaginatorView(View):
-    """対戦履歴のページネーションView"""
     
     def __init__(self, embeds: List[discord.Embed]):
         super().__init__(timeout=600)
@@ -461,7 +450,6 @@ class MatchHistoryPaginatorView(View):
     
     @discord.ui.button(label="⬅️ 前へ", style=discord.ButtonStyle.primary)
     async def previous(self, button: Button, interaction: discord.Interaction):
-        """前のページへ"""
         if self.current > 0:
             self.current -= 1
             await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
@@ -470,7 +458,6 @@ class MatchHistoryPaginatorView(View):
     
     @discord.ui.button(label="➡️ 次へ", style=discord.ButtonStyle.primary)
     async def next(self, button: Button, interaction: discord.Interaction):
-        """次のページへ"""
         if self.current < len(self.embeds) - 1:
             self.current += 1
             await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
@@ -478,7 +465,6 @@ class MatchHistoryPaginatorView(View):
             await interaction.response.defer()
     
     async def on_timeout(self):
-        """タイムアウト時の処理"""
         try:
             for item in self.children:
                 item.disabled = True
@@ -486,8 +472,6 @@ class MatchHistoryPaginatorView(View):
             self.logger.error(f"Error in on_timeout: {e}")
 
 class DetailedMatchHistoryView(View):
-    """詳細な全対戦履歴表示View（レーティング更新チャンネル用）"""
-    
     def __init__(self):
         super().__init__(timeout=None)
         
@@ -499,7 +483,6 @@ class DetailedMatchHistoryView(View):
         self.add_item(detailed_match_history_button)
     
     async def show_detailed_match_history(self, interaction: discord.Interaction):
-        """詳細な全対戦履歴を表示"""
         try:
             await interaction.response.defer(ephemeral=True)
             
@@ -1507,26 +1490,9 @@ class OpponentAnalysisClassSelect(Select):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            from viewmodels.record_vm import RecordViewModel
-            record_vm = RecordViewModel()
-            
-            await self.show_opponent_class_analysis(
-                interaction, selected_classes, self.sort_type, 
-                self.season_id, self.season_name, self.date_range
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error in opponent class analysis: {e}")
-            await interaction.followup.send("エラーが発生しました。", ephemeral=True)
-    
-    async def show_opponent_class_analysis(self, interaction: discord.Interaction, 
-                                         selected_classes: List[str], sort_type: str,
-                                         season_id: Optional[int], season_name: Optional[str],
-                                         date_range: Optional[tuple]):
-        try:
             # 分析データを取得
             analysis_data = await self.get_opponent_class_analysis_data(
-                selected_classes, season_id, season_name, date_range
+                selected_classes, self.season_id, self.season_name, self.date_range
             )
             
             if not analysis_data:
@@ -1537,7 +1503,7 @@ class OpponentAnalysisClassSelect(Select):
                 return
             
             # ソート
-            if sort_type == "wins":
+            if self.sort_type == "wins":
                 # 勝利数順（多い順）
                 sorted_data = sorted(analysis_data, key=lambda x: x['opponent_wins'], reverse=True)
             else:  # rate
@@ -1550,16 +1516,16 @@ class OpponentAnalysisClassSelect(Select):
             else:
                 class_desc = f"{selected_classes[0]} + {selected_classes[1]}"
             
-            if season_name:
-                period_desc = f"シーズン {season_name}"
-            elif date_range:
-                start_date = date_range[0][:10]
-                end_date = date_range[1][:10]
+            if self.season_name:
+                period_desc = f"シーズン {self.season_name}"
+            elif self.date_range:
+                start_date = self.date_range[0][:10]
+                end_date = self.date_range[1][:10]
                 period_desc = f"{start_date} ～ {end_date}"
             else:
                 period_desc = "全シーズン"
             
-            sort_desc = "勝利数順" if sort_type == "wins" else "勝率順"
+            sort_desc = "勝利数順" if self.sort_type == "wins" else "勝率順"
             
             # ページ分割して表示
             embeds = self.create_analysis_embeds(
@@ -1570,14 +1536,15 @@ class OpponentAnalysisClassSelect(Select):
                 message = await interaction.followup.send(embed=embeds[0], ephemeral=True)
                 
                 if len(embeds) > 1:
+                    from views.record_view import OpponentAnalysisPaginatorView
                     view = OpponentAnalysisPaginatorView(embeds)
                     await message.edit(view=view)
             
         except Exception as e:
-            self.logger.error(f"Error showing opponent class analysis: {e}")
+            self.logger.error(f"Error in opponent class analysis: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
-            await interaction.followup.send("分析の実行中にエラーが発生しました。", ephemeral=True)
+            await interaction.followup.send("エラーが発生しました。", ephemeral=True)
     
     async def get_opponent_class_analysis_data(self, selected_classes: List[str], 
                                              season_id: Optional[int], season_name: Optional[str],
@@ -1606,7 +1573,7 @@ class OpponentAnalysisClassSelect(Select):
             
             # 指定クラス組み合わせに関する対戦のみ
             if len(selected_classes) == 1:
-                # 単体クラス
+                # 単体クラス - 修正版
                 class_name = selected_classes[0]
                 query = query.filter(
                     or_(
@@ -1617,7 +1584,7 @@ class OpponentAnalysisClassSelect(Select):
                     )
                 )
             else:
-                # 2つのクラス組み合わせ
+                # 2つのクラス組み合わせ（既存のまま）
                 class1, class2 = selected_classes
                 query = query.filter(
                     or_(
@@ -1642,48 +1609,89 @@ class OpponentAnalysisClassSelect(Select):
             
             opponent_stats = {}
             
-            # 全クラス組み合わせを生成
-            from config.settings import VALID_CLASSES
-            all_combinations = []
-            
-            # 2つのクラスの組み合わせ（C(7,2) = 21通り）
-            for combo in combinations(VALID_CLASSES, 2):
-                combo_key = tuple(sorted(combo))
-                all_combinations.append(combo_key)
-            
-            # 各組み合わせに対して、どちらを選択したかで分ける
-            for combo in all_combinations:
-                for selected_class in combo:
-                    key = (combo, selected_class)
-                    opponent_stats[key] = {
+            if len(selected_classes) == 1:
+                # 単一クラス選択時：7種類のクラスそれぞれとの戦績を集計
+                from config.settings import VALID_CLASSES
+                class_name = selected_classes[0]
+                
+                # 各クラスに対して統計を初期化
+                for opponent_class in VALID_CLASSES:
+                    opponent_stats[opponent_class] = {
                         'total_matches': 0,
                         'opponent_wins': 0,
                         'my_wins': 0
                     }
-            
-            # マッチデータを分析
-            for match in matches:
-                # 指定クラス使用者を特定
-                my_user_id = None
-                opponent_user_id = None
-                opponent_class_combo = None
-                opponent_selected_class = None
                 
-                if len(selected_classes) == 1:
-                    class_name = selected_classes[0]
+                # マッチデータを分析
+                for match in matches:
+                    # 指定クラス使用者を特定
+                    my_user_id = None
+                    opponent_user_id = None
+                    opponent_selected_class = None
+                    
                     if match.user1_selected_class == class_name:
                         my_user_id = match.user1_id
                         opponent_user_id = match.user2_id
-                        if match.user2_class_a and match.user2_class_b:
-                            opponent_class_combo = tuple(sorted([match.user2_class_a, match.user2_class_b]))
-                            opponent_selected_class = match.user2_selected_class
+                        opponent_selected_class = match.user2_selected_class
                     elif match.user2_selected_class == class_name:
                         my_user_id = match.user2_id
                         opponent_user_id = match.user1_id
-                        if match.user1_class_a and match.user1_class_b:
-                            opponent_class_combo = tuple(sorted([match.user1_class_a, match.user1_class_b]))
-                            opponent_selected_class = match.user1_selected_class
-                else:
+                        opponent_selected_class = match.user1_selected_class
+                    
+                    # 統計を更新
+                    if opponent_selected_class and opponent_selected_class in opponent_stats:
+                        opponent_stats[opponent_selected_class]['total_matches'] += 1
+                        
+                        if match.winner_user_id == my_user_id:
+                            opponent_stats[opponent_selected_class]['my_wins'] += 1
+                        else:
+                            opponent_stats[opponent_selected_class]['opponent_wins'] += 1
+                
+                # 結果を整形
+                result = []
+                for opponent_class, stats in opponent_stats.items():
+                    if stats['total_matches'] > 0:  # 対戦があったクラスのみ
+                        win_rate = (stats['my_wins'] / stats['total_matches']) * 100
+                        result.append({
+                            'opponent_class_combo': opponent_class,  # 単一クラス名
+                            'opponent_selected_class': opponent_class,
+                            'total_matches': stats['total_matches'],
+                            'opponent_wins': stats['opponent_wins'],
+                            'my_wins': stats['my_wins'],
+                            'win_rate': win_rate
+                        })
+                
+                return result
+                
+            else:
+                # 2つのクラス組み合わせ（既存の処理をそのまま維持）
+                # 全クラス組み合わせを生成
+                from config.settings import VALID_CLASSES
+                all_combinations = []
+                
+                # 2つのクラスの組み合わせ（C(7,2) = 21通り）
+                for combo in combinations(VALID_CLASSES, 2):
+                    combo_key = tuple(sorted(combo))
+                    all_combinations.append(combo_key)
+                
+                # 各組み合わせに対して、どちらを選択したかで分ける
+                for combo in all_combinations:
+                    for selected_class in combo:
+                        key = (combo, selected_class)
+                        opponent_stats[key] = {
+                            'total_matches': 0,
+                            'opponent_wins': 0,
+                            'my_wins': 0
+                        }
+                
+                # マッチデータを分析（既存の処理）
+                for match in matches:
+                    # 指定クラス使用者を特定
+                    my_user_id = None
+                    opponent_user_id = None
+                    opponent_class_combo = None
+                    opponent_selected_class = None
+                    
                     class1, class2 = selected_classes
                     class_set = {class1, class2}
                     
@@ -1709,36 +1717,36 @@ class OpponentAnalysisClassSelect(Select):
                         if match.user1_class_a and match.user1_class_b:
                             opponent_class_combo = tuple(sorted([match.user1_class_a, match.user1_class_b]))
                             opponent_selected_class = match.user1_selected_class
-                
-                # 統計を更新
-                if (opponent_class_combo and opponent_selected_class and 
-                    opponent_class_combo in [combo for combo, _ in opponent_stats.keys()]):
                     
-                    key = (opponent_class_combo, opponent_selected_class)
-                    if key in opponent_stats:
-                        opponent_stats[key]['total_matches'] += 1
+                    # 統計を更新
+                    if (opponent_class_combo and opponent_selected_class and 
+                        opponent_class_combo in [combo for combo, _ in opponent_stats.keys()]):
                         
-                        # 勝敗判定
-                        if match.winner_user_id == opponent_user_id:
-                            opponent_stats[key]['opponent_wins'] += 1
-                        else:
-                            opponent_stats[key]['my_wins'] += 1
-            
-            # 結果を整理（試合数0でも表示）
-            result = []
-            for (combo, selected_class), stats in opponent_stats.items():
-                win_rate = (stats['opponent_wins'] / stats['total_matches'] * 100) if stats['total_matches'] > 0 else 0
+                        key = (opponent_class_combo, opponent_selected_class)
+                        if key in opponent_stats:
+                            opponent_stats[key]['total_matches'] += 1
+                            
+                            if match.winner_user_id == my_user_id:
+                                opponent_stats[key]['my_wins'] += 1
+                            else:
+                                opponent_stats[key]['opponent_wins'] += 1
                 
-                result.append({
-                    'opponent_class_combo': f"{combo[0]} + {combo[1]}",
-                    'opponent_selected_class': selected_class,
-                    'total_matches': stats['total_matches'],
-                    'opponent_wins': stats['opponent_wins'],
-                    'my_wins': stats['my_wins'],
-                    'win_rate': win_rate
-                })
-            
-            return result
+                # 結果を整形（既存の処理）
+                result = []
+                for (combo, selected_class), stats in opponent_stats.items():
+                    if stats['total_matches'] > 0:
+                        combo_str = f"{combo[0]} + {combo[1]}"
+                        win_rate = (stats['my_wins'] / stats['total_matches']) * 100
+                        result.append({
+                            'opponent_class_combo': combo_str,
+                            'opponent_selected_class': selected_class,
+                            'total_matches': stats['total_matches'],
+                            'opponent_wins': stats['opponent_wins'],
+                            'my_wins': stats['my_wins'],
+                            'win_rate': win_rate
+                        })
+                
+                return result
         
         # データベースアクセス
         from models.match import MatchModel
@@ -1766,139 +1774,193 @@ class OpponentAnalysisClassSelect(Select):
             
             VALID_CLASSES = ['エルフ', 'ロイヤル', 'ウィッチ', 'ドラゴン', 'ナイトメア', 'ビショップ', 'ネメシス']
         
-        from itertools import combinations
-        
         embeds = []
         
-        # 全クラス組み合わせを生成
-        all_combinations = []
-        for combo in combinations(VALID_CLASSES, 2):
-            combo_key = tuple(sorted(combo))
-            all_combinations.append(combo_key)
-        
-        # 完全なデータセットを作成（すべての組み合わせ × すべての選択クラス）
-        complete_data = []
-        
-        # 既存データをマップに変換
-        existing_data_map = {}
-        for item in analysis_data:
-            combo_tuple = tuple(sorted(item['opponent_class_combo'].split(' + ')))
-            selected_class = item['opponent_selected_class']
-            key = (combo_tuple, selected_class)
-            existing_data_map[key] = item
-        
-        # 全組み合わせに対して完全なデータを作成
-        for combo_tuple in all_combinations:
-            combo_str = f"{combo_tuple[0]} + {combo_tuple[1]}"
+        # 単一クラス選択時と組み合わせ選択時で処理を分ける
+        if "単体" in class_desc:
+            # 単一クラス選択時：7種類のクラス個別表示
+            if not analysis_data:
+                embed = discord.Embed(
+                    title=f"投げられたクラス分析 ({sort_desc})",
+                    description=f"**分析対象:** {class_desc}\n**期間:** {period_desc}\n\n該当するデータがありませんでした。",
+                    color=discord.Color.orange()
+                )
+                return [embed]
             
-            # 組み合わせの合計戦数をチェック
-            combo_total_matches = 0
-            combo_data = []
+            # 1ページあたり7クラス表示
+            items_per_page = 7
             
-            # 各組み合わせの2つのクラス選択を確実に作成
-            for selected_class in combo_tuple:
-                key = (combo_tuple, selected_class)
+            for page_start in range(0, len(analysis_data), items_per_page):
+                page_num = (page_start // items_per_page) + 1
+                total_pages = (len(analysis_data) + items_per_page - 1) // items_per_page
                 
-                if key in existing_data_map:
-                    # 既存データがある場合
-                    item_data = existing_data_map[key]
-                    combo_data.append(item_data)
-                    combo_total_matches += item_data['total_matches']
-                else:
-                    # 既存データがない場合、0のデータを作成
-                    combo_data.append({
-                        'opponent_class_combo': combo_str,
-                        'opponent_selected_class': selected_class,
-                        'total_matches': 0,
-                        'opponent_wins': 0,
-                        'my_wins': 0,
-                        'win_rate': 0.0
-                    })
-            
-            # 組み合わせ単位で対戦合計が0戦でない場合のみ追加
-            if combo_total_matches > 0:
-                complete_data.extend(combo_data)
-        
-        # データが空の場合の処理
-        if not complete_data:
-            embed = discord.Embed(
-                title=f"投げられたクラス分析 ({sort_desc})",
-                description=f"**分析対象:** {class_desc}\n**期間:** {period_desc}\n\n該当するデータがありませんでした。",
-                color=discord.Color.orange()
-            )
-            return [embed]
-        
-        # ソート（元のソート基準を維持）
-        if sort_desc == "勝利数順":
-            complete_data.sort(key=lambda x: (x['opponent_wins'], x['win_rate']), reverse=True)
-        else:  # 勝率順
-            complete_data.sort(key=lambda x: (x['win_rate'], x['opponent_wins']), reverse=True)
-        
-        # ページごとに処理（11組合せ = 22個のデータ per page）
-        items_per_page = 22  # 11組合せ × 2選択 = 22個
-        
-        for page_start in range(0, len(complete_data), items_per_page):
-            page_num = (page_start // items_per_page) + 1
-            total_pages = (len(complete_data) + items_per_page - 1) // items_per_page
-            
-            embed = discord.Embed(
-                title=f"投げられたクラス分析 ({sort_desc}) - Page {page_num}/{total_pages}",
-                description=f"**分析対象:** {class_desc}\n**期間:** {period_desc}",
-                color=discord.Color.green()
-            )
-            
-            # 現在のページのデータを取得
-            page_data = complete_data[page_start:page_start + items_per_page]
-            
-            # 組み合わせごとにグループ化
-            page_combo_groups = {}
-            for item in page_data:
-                combo = item['opponent_class_combo']
-                if combo not in page_combo_groups:
-                    page_combo_groups[combo] = []
-                page_combo_groups[combo].append(item)
-            
-            # 組み合わせを名前順でソート
-            sorted_combos = sorted(page_combo_groups.keys())
-            
-            # 各組み合わせを表示
-            for combo in sorted_combos:
-                items = page_combo_groups[combo]
+                embed = discord.Embed(
+                    title=f"投げられたクラス分析 ({sort_desc}) - Page {page_num}/{total_pages}",
+                    description=f"**分析対象:** {class_desc}\n**期間:** {period_desc}",
+                    color=discord.Color.green()
+                )
                 
-                # 組み合わせ合計を計算
-                combo_total_matches = sum(item['total_matches'] for item in items)
-                combo_opponent_wins = sum(item['opponent_wins'] for item in items)
-                combo_my_wins = sum(item['my_wins'] for item in items)
-                combo_win_rate = (combo_opponent_wins / combo_total_matches * 100) if combo_total_matches > 0 else 0
+                # 現在のページのデータを取得
+                page_data = analysis_data[page_start:page_start + items_per_page]
                 
-                # 組み合わせ合計が0戦の場合はスキップ（二重チェック）
-                if combo_total_matches == 0:
-                    continue
-                
-                field_value = f"**組み合わせ合計：** {combo_opponent_wins}勝 - {combo_my_wins}敗 ({combo_win_rate:.1f}%)\n\n"
-                
-                # クラス選択を名前順でソート
-                items.sort(key=lambda x: x['opponent_selected_class'])
-                
-                # 各クラス選択を表示
-                for item in items:
-                    class_emoji = get_class_emoji(item['opponent_selected_class'])
-                    field_value += (
-                        f"└ {class_emoji}**{item['opponent_selected_class']}選択：** "
-                        f"{item['opponent_wins']}勝 - {item['my_wins']}敗 "
-                        f"({item['win_rate']:.1f}%)\n"
+                # 各クラスの戦績を表示
+                for item in page_data:
+                    opponent_class = item['opponent_class_combo']  # 単一クラス名
+                    total_matches = item['total_matches']
+                    opponent_wins = item['opponent_wins']
+                    my_wins = item['my_wins']
+                    win_rate = item['win_rate']
+                    
+                    # クラス絵文字を取得
+                    class_emoji = get_class_emoji(opponent_class)
+                    
+                    # シンプルな1行表示: "3勝 - 2敗 (60.0%)"
+                    field_value = f"{my_wins}勝 - {opponent_wins}敗 ({win_rate:.1f}%)"
+                    
+                    embed.add_field(
+                        name=f"{class_emoji} {opponent_class}",
+                        value=field_value,
+                        inline=True
                     )
                 
-                embed.add_field(
-                    name=f"・{combo}",
-                    value=field_value,
-                    inline=False
-                )
+                embeds.append(embed)
             
-            embeds.append(embed)
+            return embeds
         
-        return embeds
-
+        else:
+            # 2つのクラス組み合わせ選択時：既存の処理
+            from itertools import combinations
+            
+            # 全クラス組み合わせを生成
+            all_combinations = []
+            for combo in combinations(VALID_CLASSES, 2):
+                combo_key = tuple(sorted(combo))
+                all_combinations.append(combo_key)
+            
+            # 完全なデータセットを作成（すべての組み合わせ × すべての選択クラス）
+            complete_data = []
+            
+            # 既存データをマップに変換
+            existing_data_map = {}
+            for item in analysis_data:
+                combo_tuple = tuple(sorted(item['opponent_class_combo'].split(' + ')))
+                selected_class = item['opponent_selected_class']
+                key = (combo_tuple, selected_class)
+                existing_data_map[key] = item
+            
+            # 全組み合わせに対して完全なデータを作成
+            for combo_tuple in all_combinations:
+                combo_str = f"{combo_tuple[0]} + {combo_tuple[1]}"
+                
+                # 組み合わせの合計戦数をチェック
+                combo_total_matches = 0
+                combo_data = []
+                
+                # 各組み合わせの2つのクラス選択を確実に作成
+                for selected_class in combo_tuple:
+                    key = (combo_tuple, selected_class)
+                    
+                    if key in existing_data_map:
+                        # 既存データがある場合
+                        item_data = existing_data_map[key]
+                        combo_data.append(item_data)
+                        combo_total_matches += item_data['total_matches']
+                    else:
+                        # 既存データがない場合、0のデータを作成
+                        combo_data.append({
+                            'opponent_class_combo': combo_str,
+                            'opponent_selected_class': selected_class,
+                            'total_matches': 0,
+                            'opponent_wins': 0,
+                            'my_wins': 0,
+                            'win_rate': 0.0
+                        })
+                
+                # 組み合わせ単位で対戦合計が0戦でない場合のみ追加
+                if combo_total_matches > 0:
+                    complete_data.extend(combo_data)
+            
+            # データが空の場合の処理
+            if not complete_data:
+                embed = discord.Embed(
+                    title=f"投げられたクラス分析 ({sort_desc})",
+                    description=f"**分析対象:** {class_desc}\n**期間:** {period_desc}\n\n該当するデータがありませんでした。",
+                    color=discord.Color.orange()
+                )
+                return [embed]
+            
+            # ソート（元のソート基準を維持）
+            if sort_desc == "勝利数順":
+                complete_data.sort(key=lambda x: (x['opponent_wins'], x['win_rate']), reverse=True)
+            else:  # 勝率順
+                complete_data.sort(key=lambda x: (x['win_rate'], x['opponent_wins']), reverse=True)
+            
+            # ページごとに処理（11組合せ = 22個のデータ per page）
+            items_per_page = 22  # 11組合せ × 2選択 = 22個
+            
+            for page_start in range(0, len(complete_data), items_per_page):
+                page_num = (page_start // items_per_page) + 1
+                total_pages = (len(complete_data) + items_per_page - 1) // items_per_page
+                
+                embed = discord.Embed(
+                    title=f"投げられたクラス分析 ({sort_desc}) - Page {page_num}/{total_pages}",
+                    description=f"**分析対象:** {class_desc}\n**期間:** {period_desc}",
+                    color=discord.Color.green()
+                )
+                
+                # 現在のページのデータを取得
+                page_data = complete_data[page_start:page_start + items_per_page]
+                
+                # 組み合わせごとにグループ化
+                page_combo_groups = {}
+                for item in page_data:
+                    combo = item['opponent_class_combo']
+                    if combo not in page_combo_groups:
+                        page_combo_groups[combo] = []
+                    page_combo_groups[combo].append(item)
+                
+                # 組み合わせを名前順でソート
+                sorted_combos = sorted(page_combo_groups.keys())
+                
+                # 各組み合わせを表示
+                for combo in sorted_combos:
+                    combo_items = page_combo_groups[combo]
+                    
+                    # タイトル用の絵文字を組み合わせの順番で取得
+                    combo_parts = combo.split(' + ')
+                    title_emoji1 = get_class_emoji(combo_parts[0])
+                    title_emoji2 = get_class_emoji(combo_parts[1])
+                    
+                    # 組み合わせの合計戦績を計算
+                    combo_total_matches = sum(item['total_matches'] for item in combo_items)
+                    combo_total_my_wins = sum(item['my_wins'] for item in combo_items)
+                    combo_total_opponent_wins = sum(item['opponent_wins'] for item in combo_items)
+                    combo_win_rate = (combo_total_my_wins / combo_total_matches * 100) if combo_total_matches > 0 else 0
+                    
+                    field_value_parts = []
+                    for item in combo_items:
+                        selected_class = item['opponent_selected_class']
+                        total_matches = item['total_matches']
+                        opponent_wins = item['opponent_wins']
+                        my_wins = item['my_wins']
+                        win_rate = item['win_rate']
+                    
+                        # 「・」を使用してシンプルに表示
+                        field_value_parts.append(
+                            f"・**{selected_class}選択:** {my_wins}勝-{opponent_wins}敗 {win_rate:.1f}%"
+                        )
+                    
+                    field_value = "\n".join(field_value_parts)
+                    
+                    embed.add_field(
+                        name=f"{title_emoji1}{title_emoji2} {combo} (合計：{combo_total_my_wins}勝-{combo_total_opponent_wins}敗 {combo_win_rate:.1f}%)",
+                        value=field_value,
+                        inline=False
+                    )
+                
+                embeds.append(embed)
+            
+            return embeds
 class OpponentAnalysisPaginatorView(View):
     def __init__(self, embeds: List[discord.Embed]):
         super().__init__(timeout=600)
@@ -1933,7 +1995,6 @@ class OpponentAnalysisPaginatorView(View):
         )
     
     async def on_timeout(self):
-        """タイムアウト時の処理"""
         try:
             for item in self.children:
                 item.disabled = True
@@ -1942,7 +2003,6 @@ class OpponentAnalysisPaginatorView(View):
 
 
 class DetailedRecordView(View):
-    """詳細戦績表示View（レーティング更新チャンネル用）"""
     
     def __init__(self):
         super().__init__(timeout=None)
