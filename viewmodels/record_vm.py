@@ -244,9 +244,9 @@ class RecordViewModel:
         await self._delete_message_after_delay(message, 300)
     
     async def show_detailed_class_stats(self, interaction: discord.Interaction, user_id: int, 
-                                      selected_classes: List[str], season_id: Optional[int] = None, 
-                                      date_range: Optional[tuple] = None):
-        """詳細なクラス戦績を表示（user_class、selected_classを考慮）"""
+                                    selected_classes: List[str], season_id: Optional[int] = None, 
+                                    date_range: Optional[tuple] = None):
+        """詳細なクラス戦績を表示（投げられたクラス分析と同様の表示）"""
         user = self.user_model.get_user_by_discord_id(str(user_id))
         if not user:
             message = await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
@@ -254,7 +254,6 @@ class RecordViewModel:
             return
         
         # シーズン名または日付範囲を取得
-        filter_desc = None
         if season_id is not None:
             season_data = self.season_model.get_season_by_id(season_id)
             season_name = season_data['season_name'] if season_data else None
@@ -269,95 +268,141 @@ class RecordViewModel:
             season_name = None
             filter_desc = "全シーズン"
         
-        # 詳細戦績の取得
-        if date_range is not None:
-            matches = self._get_detailed_class_matches_by_date(user['id'], selected_classes, date_range[0], date_range[1])
-        else:
-            matches = self._get_detailed_class_matches(user['id'], selected_classes, season_name)
-        
-        # 勝敗数の計算
-        win_count = sum(1 for match in matches if match['winner_user_id'] == user['id'])
-        total_count = len(matches)
-        loss_count = total_count - win_count
-        win_rate = (win_count / total_count) * 100 if total_count > 0 else 0
-        
-        # クラス表示文字列を作成
+        # 単一クラス選択時：投げられたクラス分析と同じ表示形式にする
         if len(selected_classes) == 1:
-            selected_class_str = f"{selected_classes[0]}（選択クラス基準）"
-        elif len(selected_classes) == 2:
-            selected_class_str = f"{selected_classes[0]} + {selected_classes[1]}（登録クラス基準）"
-        else:
-            selected_class_str = "複数クラス"
-        
-        # 詳細戦績メッセージ
-        detailed_message = (
-            f"**{user['user_name']} の詳細戦績**\n"
-            f"📅 **対象:** {filter_desc}\n"
-            f"🎯 **クラス:** {selected_class_str}\n"
-            f"📊 **勝率:** {win_rate:.2f}%\n"
-            f"🎮 **戦績:** {total_count}戦   {win_count}勝-{loss_count}敗"
-        )
-        
-        # 実際の試合期間を表示（日付範囲指定の場合）
-        if date_range is not None and matches:
-            first_match_date = matches[-1]['match_date'][:10] if matches else "不明"
-            last_match_date = matches[0]['match_date'][:10] if matches else "不明"
-            detailed_message += f"\n🗓️ **実際の試合期間:** {first_match_date} ～ {last_match_date}"
-        
-        # 最近の試合履歴も表示（最大10試合）
-        if matches:
-            detailed_message += "\n\n**最近の試合履歴（最大10戦）:**"
-            recent_matches = matches[:10]  # 最新10試合
+            selected_class = selected_classes[0]
             
-            for i, match in enumerate(recent_matches, 1):
-                # 対戦相手名を取得
-                if match['user1_id'] == user['id']:
-                    opponent_data = self.user_model.get_user_by_id(match['user2_id'])
-                    user_won = match['winner_user_id'] == user['id']
-                    user_selected_class = match.get('user1_selected_class', 'Unknown')
-                else:
-                    opponent_data = self.user_model.get_user_by_id(match['user1_id'])
-                    user_won = match['winner_user_id'] == user['id']
-                    user_selected_class = match.get('user2_selected_class', 'Unknown')
-                
-                # user_dataが辞書かオブジェクトかを判定して適切にアクセス
-                def get_attr(data, attr_name, default=None):
-                    if isinstance(data, dict):
-                        return data.get(attr_name, default)
-                    else:
-                        return getattr(data, attr_name, default)
-                
-                if opponent_data:
-                    opponent_name = get_attr(opponent_data, 'user_name', 'Unknown')
-                    opponent_discord_id = get_attr(opponent_data, 'discord_id', None)
-                    
-                    # Discord Username を取得
-                    opponent_username = None
-                    if opponent_discord_id:
-                        try:
-                            # interactionオブジェクトが利用可能な場合
-                            discord_member = interaction.guild.get_member(int(opponent_discord_id))
-                            if discord_member:
-                                opponent_username = discord_member.name
-                        except (ValueError, AttributeError):
-                            pass
-                    
-                    if opponent_username:
-                        opponent_display = f"{opponent_name} (@{opponent_username})"
-                    else:
-                        opponent_display = opponent_name
-                else:
-                    opponent_display = 'Unknown'
-                
-                result_emoji = "🔵" if user_won else "🔴"
-                result_text = "勝利" if user_won else "敗北"
-                
-                match_date = match.get('match_date', '')[:10] if match.get('match_date') else 'Unknown'
-                
-                detailed_message += f"\n{i}. {result_emoji} vs {opponent_display} ({user_selected_class}) - {result_text} ({match_date})"
+            # 投げられたクラス分析と同じロジックを使用
+            analysis_data = self._get_detailed_analysis_data_for_user(
+                user['id'], [selected_class], season_id, season_name, date_range
+            )
+            
+            if not analysis_data:
+                message = await interaction.followup.send(
+                    f"**{user['user_name']} の詳細戦績**\n"
+                    f"📅 **対象:** {filter_desc}\n"
+                    f"🎯 **クラス:** {selected_class}（選択クラス基準）\n"
+                    f"📊 この条件に該当する試合記録はありません。",
+                    ephemeral=True
+                )
+                await self._delete_message_after_delay(message, 300)
+                return
+            
+            # 分析データを表示用に整形
+            detailed_message = (
+                f"**{user['user_name']} の詳細戦績**\n"
+                f" **対象:** {filter_desc}\n"
+                f" **クラス:** {selected_class}（BO1単位）\n\n"
+                f"**各クラスとの対戦結果:**\n"
+            )
+            
+            total_matches = sum(data['total'] for data in analysis_data.values())
+            total_wins = sum(data['wins'] for data in analysis_data.values())
+            overall_rate = (total_wins / total_matches) * 100 if total_matches > 0 else 0
+            
+            # クラス別戦績を表示
+            for class_name, stats in analysis_data.items():
+                wins = stats['wins']
+                total = stats['total']
+                rate = (wins / total) * 100 if total > 0 else 0
+                detailed_message += f"vs **{class_name}**： {wins}勝-{total - wins}敗 ({rate:.1f}%)\n"
+            
+            detailed_message += f"🎮 **総戦績:** {total_wins}勝-{total_matches - total_wins}敗 ({overall_rate:.2f}%)"
+            
+        else:
+            # 2つのクラス組み合わせの場合（既存の処理）
+            if date_range is not None:
+                matches = self._get_detailed_class_matches_by_date(user['id'], selected_classes, date_range[0], date_range[1])
+            else:
+                matches = self._get_detailed_class_matches(user['id'], selected_classes, season_name)
+            
+            # 勝敗数の計算
+            win_count = sum(1 for match in matches if match['winner_user_id'] == user['id'])
+            total_count = len(matches)
+            loss_count = total_count - win_count
+            win_rate = (win_count / total_count) * 100 if total_count > 0 else 0
+            
+            class1, class2 = selected_classes
+            selected_class_str = f"{class1} + {class2}（登録クラス基準）"
+            
+            detailed_message = (
+                f"**{user['user_name']} の詳細戦績**\n"
+                f"**対象:** {filter_desc}\n"
+                f"**クラス:** {selected_class_str}\n"
+                f"**勝率:** {win_rate:.2f}%\n"
+                f"**戦績:** {total_count}戦   {win_count}勝-{loss_count}敗"
+            )
         
         message = await interaction.followup.send(detailed_message, ephemeral=True)
         await self._delete_message_after_delay(message, 300)
+    def _get_detailed_analysis_data_for_user(self, user_id: int, selected_classes: List[str], 
+                                       season_id: Optional[int], season_name: Optional[str],
+                                       date_range: Optional[tuple]) -> Dict[str, Dict[str, int]]:
+        """ユーザー個人の詳細分析データを取得（投げられたクラス分析と同じロジック）"""
+        def _get_analysis_data(session):
+            from config.database import MatchHistory
+            from sqlalchemy import or_, and_
+            from config.settings import VALID_CLASSES
+            
+            # ベースクエリ：完了した試合のみ
+            query = session.query(MatchHistory).filter(
+                MatchHistory.winner_user_id.isnot(None)
+            )
+            
+            # 期間フィルター
+            if season_name:
+                query = query.filter(MatchHistory.season_name == season_name)
+            elif date_range:
+                start_date, end_date = date_range
+                query = query.filter(
+                    and_(
+                        MatchHistory.match_date >= start_date,
+                        MatchHistory.match_date <= end_date
+                    )
+                )
+            
+            # 指定クラスを選択した試合のみ
+            class_name = selected_classes[0]
+            query = query.filter(
+                or_(
+                    # user1が指定クラスを選択
+                    and_(
+                        MatchHistory.user1_id == user_id,
+                        MatchHistory.user1_selected_class == class_name
+                    ),
+                    # user2が指定クラスを選択  
+                    and_(
+                        MatchHistory.user2_id == user_id,
+                        MatchHistory.user2_selected_class == class_name
+                    )
+                )
+            )
+            
+            matches = query.all()
+            
+            # 各クラスに対して統計を初期化
+            opponent_stats = {cls: {'wins': 0, 'total': 0} for cls in VALID_CLASSES}
+            
+            # 各試合を分析
+            for match in matches:
+                if match.user1_id == user_id:
+                    # user1がターゲットユーザー
+                    opponent_selected = match.user2_selected_class
+                    won = match.winner_user_id == user_id
+                else:
+                    # user2がターゲットユーザー
+                    opponent_selected = match.user1_selected_class
+                    won = match.winner_user_id == user_id
+                
+                if opponent_selected and opponent_selected in opponent_stats:
+                    opponent_stats[opponent_selected]['total'] += 1
+                    if won:
+                        opponent_stats[opponent_selected]['wins'] += 1
+            
+            # 戦績があるクラスのみ返す
+            return {cls: stats for cls, stats in opponent_stats.items() if stats['total'] > 0}
+        
+        return self.match_model.safe_execute(_get_analysis_data) or {}
     
     def _get_matches_by_date_range(self, user_id: int, start_date: Optional[str], end_date: str) -> List[Dict[str, Any]]:
         """日付範囲で試合を取得"""
@@ -405,8 +450,8 @@ class RecordViewModel:
         return self.match_model.safe_execute(_get_matches) or []
     
     def _get_detailed_class_matches_by_date(self, user_id: int, selected_classes: List[str], 
-                                           start_date: Optional[str], end_date: str) -> List[Dict[str, Any]]:
-        """日付範囲での詳細なクラス戦績を取得（user_class、selected_classを考慮）"""
+                                        start_date: Optional[str], end_date: str) -> List[Dict[str, Any]]:
+        """日付範囲で詳細なクラス戦績を取得（修正版）"""
         def _get_matches(session):
             from config.database import MatchHistory
             from sqlalchemy import or_, and_
@@ -426,35 +471,51 @@ class RecordViewModel:
             
             # クラスフィルター
             if len(selected_classes) == 1:
-                # 1つのクラスを選択：selected_classがそのクラスの試合
+                # 単一クラスの場合：選択クラスまたは登録クラスのいずれかが該当
                 class_name = selected_classes[0]
                 query = query.filter(
                     or_(
-                        and_(MatchHistory.user1_id == user_id,
-                             MatchHistory.user1_selected_class == class_name),
-                        and_(MatchHistory.user2_id == user_id,
-                             MatchHistory.user2_selected_class == class_name)
+                        # user1が指定クラスを選択または登録
+                        and_(
+                            MatchHistory.user1_id == user_id,
+                            or_(
+                                MatchHistory.user1_selected_class == class_name,
+                                MatchHistory.user1_class_a == class_name,
+                                MatchHistory.user1_class_b == class_name
+                            )
+                        ),
+                        # user2が指定クラスを選択または登録
+                        and_(
+                            MatchHistory.user2_id == user_id,
+                            or_(
+                                MatchHistory.user2_selected_class == class_name,
+                                MatchHistory.user2_class_a == class_name,
+                                MatchHistory.user2_class_b == class_name
+                            )
+                        )
                     )
                 )
             elif len(selected_classes) == 2:
-                # 2つのクラスを選択：class_a/class_bがその組み合わせの試合
+                # 2つのクラス組み合わせ（既存のロジック）
                 class1, class2 = selected_classes
                 query = query.filter(
                     or_(
-                        and_(MatchHistory.user1_id == user_id,
-                             or_(
-                                 and_(MatchHistory.user1_class_a == class1,
-                                      MatchHistory.user1_class_b == class2),
-                                 and_(MatchHistory.user1_class_a == class2,
-                                      MatchHistory.user1_class_b == class1)
-                             )),
-                        and_(MatchHistory.user2_id == user_id,
-                             or_(
-                                 and_(MatchHistory.user2_class_a == class1,
-                                      MatchHistory.user2_class_b == class2),
-                                 and_(MatchHistory.user2_class_a == class2,
-                                      MatchHistory.user2_class_b == class1)
-                             ))
+                        # user1が指定クラス組み合わせを登録
+                        and_(
+                            MatchHistory.user1_id == user_id,
+                            or_(
+                                and_(MatchHistory.user1_class_a == class1, MatchHistory.user1_class_b == class2),
+                                and_(MatchHistory.user1_class_a == class2, MatchHistory.user1_class_b == class1)
+                            )
+                        ),
+                        # user2が指定クラス組み合わせを登録
+                        and_(
+                            MatchHistory.user2_id == user_id,
+                            or_(
+                                and_(MatchHistory.user2_class_a == class1, MatchHistory.user2_class_b == class2),
+                                and_(MatchHistory.user2_class_a == class2, MatchHistory.user2_class_b == class1)
+                            )
+                        )
                     )
                 )
             
@@ -495,9 +556,9 @@ class RecordViewModel:
             ]
         
         return self.match_model.safe_execute(_get_matches) or []
-    
+
     def _get_detailed_class_matches(self, user_id: int, selected_classes: List[str], 
-                                   season_name: Optional[str] = None) -> List[Dict[str, Any]]:
+                                season_name: Optional[str] = None) -> List[Dict[str, Any]]:
         """詳細なクラス戦績を取得（user_class、selected_classを考慮）"""
         def _get_matches(session):
             from config.database import MatchHistory
@@ -511,41 +572,58 @@ class RecordViewModel:
                 )
             )
             
-            # シーズンフィルター
-            if season_name:
+            # シーズンフィルター（修正：全シーズンの場合はフィルターしない）
+            if season_name is not None:
                 query = query.filter(MatchHistory.season_name == season_name)
+            # season_name が None の場合は全シーズンのデータを取得
             
             # クラスフィルター
             if len(selected_classes) == 1:
-                # 1つのクラスを選択：selected_classがそのクラスの試合
+                # 単一クラスの場合：選択クラスまたは登録クラスのいずれかが該当
                 class_name = selected_classes[0]
                 query = query.filter(
                     or_(
-                        and_(MatchHistory.user1_id == user_id,
-                             MatchHistory.user1_selected_class == class_name),
-                        and_(MatchHistory.user2_id == user_id,
-                             MatchHistory.user2_selected_class == class_name)
+                        # user1が指定クラスを選択または登録
+                        and_(
+                            MatchHistory.user1_id == user_id,
+                            or_(
+                                MatchHistory.user1_selected_class == class_name,
+                                MatchHistory.user1_class_a == class_name,
+                                MatchHistory.user1_class_b == class_name
+                            )
+                        ),
+                        # user2が指定クラスを選択または登録
+                        and_(
+                            MatchHistory.user2_id == user_id,
+                            or_(
+                                MatchHistory.user2_selected_class == class_name,
+                                MatchHistory.user2_class_a == class_name,
+                                MatchHistory.user2_class_b == class_name
+                            )
+                        )
                     )
                 )
             elif len(selected_classes) == 2:
-                # 2つのクラスを選択：class_a/class_bがその組み合わせの試合
+                # 2つのクラス組み合わせ（既存のロジック）
                 class1, class2 = selected_classes
                 query = query.filter(
                     or_(
-                        and_(MatchHistory.user1_id == user_id,
-                             or_(
-                                 and_(MatchHistory.user1_class_a == class1,
-                                      MatchHistory.user1_class_b == class2),
-                                 and_(MatchHistory.user1_class_a == class2,
-                                      MatchHistory.user1_class_b == class1)
-                             )),
-                        and_(MatchHistory.user2_id == user_id,
-                             or_(
-                                 and_(MatchHistory.user2_class_a == class1,
-                                      MatchHistory.user2_class_b == class2),
-                                 and_(MatchHistory.user2_class_a == class2,
-                                      MatchHistory.user2_class_b == class1)
-                             ))
+                        # user1が指定クラス組み合わせを登録
+                        and_(
+                            MatchHistory.user1_id == user_id,
+                            or_(
+                                and_(MatchHistory.user1_class_a == class1, MatchHistory.user1_class_b == class2),
+                                and_(MatchHistory.user1_class_a == class2, MatchHistory.user1_class_b == class1)
+                            )
+                        ),
+                        # user2が指定クラス組み合わせを登録
+                        and_(
+                            MatchHistory.user2_id == user_id,
+                            or_(
+                                and_(MatchHistory.user2_class_a == class1, MatchHistory.user2_class_b == class2),
+                                and_(MatchHistory.user2_class_a == class2, MatchHistory.user2_class_b == class1)
+                            )
+                        )
                     )
                 )
             

@@ -637,6 +637,8 @@ class DetailedSeasonSelectView(View):
         super().__init__(timeout=None)
         self.add_item(DetailedSeasonSelect())
 
+# views/record_view.py の DetailedSeasonSelect クラスの修正版
+
 class DetailedSeasonSelect(Select):
     """詳細戦績用のシーズン選択セレクト"""
     
@@ -652,85 +654,58 @@ class DetailedSeasonSelect(Select):
         options.append(discord.SelectOption(
             label="日付で絞り込む", 
             value="date_range",
-            emoji="📅"
         ))
+        
+        # 現在のシーズンを追加（修正）
+        if current_season:
+            options.append(discord.SelectOption(
+                label=f"{current_season.season_name} (現在)", 
+                value=f"season_{current_season.id}",
+                emoji="🌟"
+            ))
+        
+        # 過去のシーズンを追加
+        if past_seasons:
+            for season in past_seasons:
+                options.append(discord.SelectOption(
+                    label=season['season_name'], 
+                    value=f"season_{season['id']}"
+                ))
         
         super().__init__(
             placeholder="シーズンを選択してください...", 
             options=options if options else [discord.SelectOption(label="シーズンなし", value="none")]
         )
 
-        if current_season:
-            options.append(discord.SelectOption(
-                label=current_season.season_name, 
-                value=f"current_{current_season.id}"
-            ))
-
-        for season in past_seasons:
-            options.append(discord.SelectOption(
-                label=season['season_name'], 
-                value=f"past_{season['id']}"
-            ))
-    
     async def callback(self, interaction: discord.Interaction):
-        """シーズン選択のコールバック"""
-        selected_value = self.values[0]
+        """詳細シーズン選択のコールバック"""
+        selection = self.values[0]
         
-        if selected_value == "none":
-            await interaction.response.send_message("利用可能なシーズンがありません。", ephemeral=True)
-            return
-        
-        if selected_value == "date_range":
-            # 日付範囲入力モーダルを表示
+        if selection == "all":
+            # 全シーズンを選択した場合
+            await interaction.response.send_message(
+                content="クラスを選択してください：",
+                view=DetailedClassSelectView(season_id=None, date_range=None),
+                ephemeral=True
+            )
+        elif selection == "date_range":
+            # 日付範囲を選択した場合
             modal = DateRangeInputModal()
             await interaction.response.send_modal(modal)
-            return
-        
-        await interaction.response.defer(ephemeral=True)
-        
-        # 選択された値を解析
-        if selected_value == "all":
-            season_id = None
-            season_type = "all"
-        elif selected_value.startswith("current_"):
-            season_id = int(selected_value.split("_")[1])
-            season_type = "current"
-        elif selected_value.startswith("past_"):
-            season_id = int(selected_value.split("_")[1])
-            season_type = "past"
-        else:
-            await interaction.followup.send("無効な選択です。", ephemeral=True)
-            return
-        
-        # ユーザーがそのシーズンに参加しているかチェック
-        if season_id is not None and season_type == "past":
-            user_model = UserModel()
-            user = user_model.get_user_by_discord_id(str(interaction.user.id))
-            
-            if not user:
-                await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
-                return
-            
+        elif selection.startswith("season_"):
+            # 特定のシーズンを選択した場合
+            season_id = int(selection.split("_")[1])
             season_model = SeasonModel()
-            user_record = season_model.get_user_season_record(user['id'], season_id)
+            season_data = season_model.get_season_by_id(season_id)
+            season_name = season_data['season_name'] if season_data else "不明"
             
-            if user_record is None:
-                await interaction.followup.send("そのシーズンには参加していません。", ephemeral=True)
-                return
-        elif season_id is not None and season_type == "current":
-            user_model = UserModel()
-            user = user_model.get_user_by_discord_id(str(interaction.user.id))
-            
-            if user and not user['latest_season_matched']:
-                await interaction.followup.send("現在のシーズンには参加していません。", ephemeral=True)
-                return
-        
-        # クラス選択を表示
-        await interaction.followup.send(
-            content="詳細戦績のクラスを選択してください:", 
-            view=DetailedClassSelectView(season_id=season_id),
-            ephemeral=True
-        )
+            await interaction.response.send_message(
+                content=f"クラスを選択してください：",
+                view=DetailedClassSelectView(season_id=season_id, date_range=None),
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("無効な選択です。", ephemeral=True)
 
 class DateRangeInputModal(discord.ui.Modal):
     """日付範囲入力用のモーダル"""
@@ -869,7 +844,7 @@ class DetailedClassSelect(Select):
         )
     
     async def callback(self, interaction: discord.Interaction):
-        """詳細クラス選択のコールバック"""
+        """詳細クラス選択のコールバック（修正版）"""
         selected_classes = self.values
         user_id = interaction.user.id
         
@@ -890,11 +865,13 @@ class DetailedClassSelect(Select):
                 else:
                     await record_vm.show_all_time_stats(interaction, user_id)
             else:
-                # 特定のクラスを選択した場合（詳細戦績モード）
+                # 特定のクラス（1つまたは2つ）を選択した場合（修正：必ず詳細戦績を表示）
                 await record_vm.show_detailed_class_stats(interaction, user_id, selected_classes, self.season_id, self.date_range)
         
         except Exception as e:
             self.logger.error(f"Error in detailed class selection callback: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             await interaction.followup.send("エラーが発生しました。", ephemeral=True)
         
         # インタラクションメッセージを削除する
@@ -902,7 +879,6 @@ class DetailedClassSelect(Select):
             await interaction.delete_original_response()
         except discord.errors.NotFound:
             pass
-
 
 class RecordClassSelectView(View):
     """戦績用クラス選択View（単一クラスまたは全クラスのみ選択可能）"""
