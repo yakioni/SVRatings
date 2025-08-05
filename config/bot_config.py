@@ -462,28 +462,6 @@ def create_bot_1():
             await ctx.respond("このコマンドは対戦スレッド内でのみ使用できます。", ephemeral=True)
     
     @bot.slash_command(
-        name="settings",
-        description="マッチング設定を変更します（相手のレートを表示/非表示）"
-    )
-    async def settings(ctx: discord.ApplicationContext, display_opponent_rating: bool = True):
-        """ユーザー設定コマンド"""
-        if ctx.channel_id != COMMAND_CHANNEL_ID:
-            await ctx.respond(f"このコマンドは <#{COMMAND_CHANNEL_ID}> で実行してください。", ephemeral=True)
-            return
-        
-        from models.user import UserModel
-        user_model = UserModel()
-        
-        user = user_model.get_user_by_discord_id(str(ctx.user.id))
-        if not user:
-            await ctx.respond("ユーザーが見つかりません。まず登録を行ってください。", ephemeral=True)
-            return
-        
-        # 設定を更新（UserModelに追加が必要）
-        status = "表示する" if display_opponent_rating else "表示しない"
-        await ctx.respond(f"マッチング時に相手のレートを**{status}**ように設定しました。", ephemeral=True)
-    
-    @bot.slash_command(
         name="trust_report", 
         description="ユーザーの信用ポイントを減点します",
         default_member_permissions=discord.Permissions(administrator=True)
@@ -1027,7 +1005,6 @@ def create_bot_2():
                     "ランキングの更新を行えます。", 
                     view=RankingUpdateView(ranking_vm)
                 )
-                # 詳細戦績機能
                 await safe_send_message(
                     rating_update_channel, 
                     "2デッキBO1単位での戦績を確認できます", 
@@ -1081,17 +1058,14 @@ async def setup_bot2_channels(bot, ranking_vm: RankingViewModel):
             )
             logging.info("Past ranking channel setup completed")
         
-        # ランキング更新チャンネル（ランキング更新 + 詳細戦績）
         rating_update_channel = bot.get_channel(RATING_UPDATE_CHANNEL_ID)
         if rating_update_channel:
             await safe_purge_channel(rating_update_channel)
-            # ランキング更新機能
             await safe_send_message(
                 rating_update_channel, 
                 "ランキングの更新を行えます。", 
                 view=RankingUpdateView(ranking_vm)
             )
-            # 詳細戦績機能
             await safe_send_message(
                 rating_update_channel, 
                 "2デッキBO1単位での戦績を確認できます", 

@@ -113,17 +113,17 @@ class RecordViewModel:
             
             stats_message = (
                 f"**{user['user_name']} の期間戦績**\n"
-                f"📅 **期間:** {range_desc}\n"
-                f"🎮 **総試合数:** {total_count}戦\n"
-                f"📊 **勝率:** {win_rate:.2f}% ({win_count}勝-{loss_count}敗)\n"
-                f"🗓️ **実際の試合期間:** {first_match_date} ～ {last_match_date}"
+                f" **期間:** {range_desc}\n"
+                f" **総試合数:** {total_count}戦\n"
+                f" **勝率:** {win_rate:.2f}% ({win_count}勝-{loss_count}敗)\n"
+                f"**実際の試合期間:** {first_match_date} ～ {last_match_date}"
             )
         else:
             stats_message = (
                 f"**{user['user_name']} の期間戦績**\n"
-                f"📅 **期間:** {range_desc}\n"
-                f"🎮 **総試合数:** 0戦\n"
-                f"📊 この期間に試合記録はありません。"
+                f" **期間:** {range_desc}\n"
+                f" **総試合数:** 0戦\n"
+                f" この期間に試合記録はありません。"
             )
         
         message = await interaction.followup.send(stats_message, ephemeral=True)
@@ -246,7 +246,7 @@ class RecordViewModel:
     async def show_detailed_class_stats(self, interaction: discord.Interaction, user_id: int, 
                                     selected_classes: List[str], season_id: Optional[int] = None, 
                                     date_range: Optional[tuple] = None):
-        """詳細なクラス戦績を表示（投げられたクラス分析と同様の表示）"""
+        """詳細なクラス戦績を表示（user_class、selected_classを考慮）"""
         user = self.user_model.get_user_by_discord_id(str(user_id))
         if not user:
             message = await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
@@ -254,6 +254,7 @@ class RecordViewModel:
             return
         
         # シーズン名または日付範囲を取得
+        filter_desc = None
         if season_id is not None:
             season_data = self.season_model.get_season_by_id(season_id)
             season_name = season_data['season_name'] if season_data else None
@@ -268,73 +269,196 @@ class RecordViewModel:
             season_name = None
             filter_desc = "全シーズン"
         
-        # 単一クラス選択時：投げられたクラス分析と同じ表示形式にする
+        # 単一クラスの場合の処理
         if len(selected_classes) == 1:
-            selected_class = selected_classes[0]
-            
-            # 投げられたクラス分析と同じロジックを使用
-            analysis_data = self._get_detailed_analysis_data_for_user(
-                user['id'], [selected_class], season_id, season_name, date_range
-            )
+            # 分析データの取得（対戦相手のクラス別）- 専用メソッドを使用
+            analysis_data = self._get_single_class_analysis_data(user['id'], selected_classes[0], season_id, date_range)
             
             if not analysis_data:
                 message = await interaction.followup.send(
-                    f"**{user['user_name']} の詳細戦績**\n"
-                    f"📅 **対象:** {filter_desc}\n"
-                    f"🎯 **クラス:** {selected_class}（選択クラス基準）\n"
-                    f"📊 この条件に該当する試合記録はありません。",
+                    f"指定した条件での {selected_classes[0]} クラスの対戦データが見つかりませんでした。", 
                     ephemeral=True
                 )
                 await self._delete_message_after_delay(message, 300)
                 return
             
-            # 分析データを表示用に整形
-            detailed_message = (
-                f"**{user['user_name']} の詳細戦績**\n"
-                f" **対象:** {filter_desc}\n"
-                f" **クラス:** {selected_class}（BO1単位）\n\n"
-                f"**各クラスとの対戦結果:**\n"
+            # 全体の統計を計算
+            total_matches = sum(data['total_matches'] for data in analysis_data)
+            total_wins = sum(data['my_wins'] for data in analysis_data)
+            total_losses = sum(data['opponent_wins'] for data in analysis_data)
+            overall_win_rate = (total_wins / total_matches * 100) if total_matches > 0 else 0
+            
+            # 勝率順にソート
+            sorted_data = sorted(analysis_data, key=lambda x: (x['win_rate'], x['my_wins']), reverse=True)
+            
+            # メッセージの作成
+            embed = discord.Embed(
+                title=f"{user['user_name']} の {selected_classes[0]} 単体での詳細戦績",
+                description=f"**対象:** {filter_desc}\n"
+                        f"**使用クラス:** {selected_classes[0]}\n"
+                        f"**総戦績:**{total_wins}勝-{total_losses}敗 {overall_win_rate:.2f}%",
+                color=discord.Color.green()
             )
             
-            total_matches = sum(data['total'] for data in analysis_data.values())
-            total_wins = sum(data['wins'] for data in analysis_data.values())
-            overall_rate = (total_wins / total_matches) * 100 if total_matches > 0 else 0
+            # 対戦相手のクラス別戦績
+            embed.add_field(name="", value="**【対戦相手のクラス別戦績】**", inline=False)
             
-            # クラス別戦績を表示
-            for class_name, stats in analysis_data.items():
-                wins = stats['wins']
-                total = stats['total']
-                rate = (wins / total) * 100 if total > 0 else 0
-                detailed_message += f"vs **{class_name}**： {wins}勝-{total - wins}敗 ({rate:.1f}%)\n"
+            for data in sorted_data:
+                if data['total_matches'] > 0:  # 対戦がある場合のみ表示
+                    embed.add_field(
+                        name=f"vs {data['opponent_class']}",  # キー名を修正
+                        value=(
+                            f"{data['my_wins']}勝-{data['opponent_wins']}敗 ({data['win_rate']:.1f}%)"
+                        ),
+                        inline=True
+                    )
             
-            detailed_message += f"🎮 **総戦績:** {total_wins}勝-{total_matches - total_wins}敗 ({overall_rate:.2f}%)"
+            message = await interaction.followup.send(embed=embed, ephemeral=True)
+            await self._delete_message_after_delay(message, 300)
+        
+        # 2クラス組合せの場合の処理（拡張版）
+        elif len(selected_classes) == 2:
+            # 分析データの取得（投げられたクラスの組合せと選択クラス別）
+            analysis_data = self._get_analysis_data(selected_classes, season_name, date_range)
             
-        else:
-            # 2つのクラス組み合わせの場合（既存の処理）
+            if not analysis_data:
+                message = await interaction.followup.send(
+                    f"指定した条件での {selected_classes[0]} + {selected_classes[1]} の対戦データが見つかりませんでした。", 
+                    ephemeral=True
+                )
+                await self._delete_message_after_delay(message, 300)
+                return
+            
+            # 詳細戦績の取得
             if date_range is not None:
                 matches = self._get_detailed_class_matches_by_date(user['id'], selected_classes, date_range[0], date_range[1])
             else:
                 matches = self._get_detailed_class_matches(user['id'], selected_classes, season_name)
             
-            # 勝敗数の計算
+            # 全体の統計
             win_count = sum(1 for match in matches if match['winner_user_id'] == user['id'])
             total_count = len(matches)
             loss_count = total_count - win_count
-            win_rate = (win_count / total_count) * 100 if total_count > 0 else 0
+            overall_win_rate = (win_count / total_count) * 100 if total_count > 0 else 0
             
-            class1, class2 = selected_classes
-            selected_class_str = f"{class1} + {class2}（登録クラス基準）"
+            # 相手のクラス組合せごとに集計
+            opponent_combo_stats = {}
             
-            detailed_message = (
-                f"**{user['user_name']} の詳細戦績**\n"
-                f"**対象:** {filter_desc}\n"
-                f"**クラス:** {selected_class_str}\n"
-                f"**勝率:** {win_rate:.2f}%\n"
-                f"**戦績:** {total_count}戦   {win_count}勝-{loss_count}敗"
+            for data in analysis_data:
+                combo_key = data['opponent_class_combo']
+                if combo_key not in opponent_combo_stats:
+                    opponent_combo_stats[combo_key] = {
+                        'total_matches': 0,
+                        'total_wins': 0,
+                        'total_losses': 0,
+                        'class_selection': {}  # 各クラスの選択回数と戦績
+                    }
+                
+                stats = opponent_combo_stats[combo_key]
+                stats['total_matches'] += data['total_matches']
+                stats['total_wins'] += data['my_wins']
+                stats['total_losses'] += data['opponent_wins']
+                
+                # 選択されたクラスごとの戦績
+                selected = data['opponent_selected_class']
+                if selected not in stats['class_selection']:
+                    stats['class_selection'][selected] = {
+                        'times_selected': 0,
+                        'wins': 0,
+                        'losses': 0
+                    }
+                
+                stats['class_selection'][selected]['times_selected'] += data['total_matches']
+                stats['class_selection'][selected]['wins'] += data['my_wins']
+                stats['class_selection'][selected]['losses'] += data['opponent_wins']
+            
+            # 勝率順にソート
+            sorted_combos = sorted(
+                opponent_combo_stats.items(), 
+                key=lambda x: (x[1]['total_wins'] / x[1]['total_matches'] if x[1]['total_matches'] > 0 else 0, x[1]['total_wins']), 
+                reverse=True
             )
+            
+            # エンベッドの作成
+            embeds = []
+            embed = discord.Embed(
+                title=f"{user['user_name']} の詳細戦績",
+                description=(
+                    f"**対象:** {filter_desc}\n"
+                    f"**使用クラス組合せ:** {selected_classes[0]} + {selected_classes[1]}\n"
+                    f"**全体勝率:** {overall_win_rate:.2f}%\n"
+                    f"**総戦績:** {total_count}戦 {win_count}勝-{loss_count}敗"
+                ),
+                color=discord.Color.blue()
+            )
+            
+            # 相手のクラス組合せごとに表示
+            current_embed = embed
+            field_count = 0
+            
+            for combo_tuple, stats in sorted_combos:
+                if field_count >= 15:  # Embedの制限に近づいたら新しいページ
+                    embeds.append(current_embed)
+                    current_embed = discord.Embed(
+                        title=f"{user['user_name']} の詳細戦績（続き）",
+                        color=discord.Color.blue()
+                    )
+                    field_count = 0
+                
+                # クラス組合せの表示
+                if isinstance(combo_tuple, tuple) and len(combo_tuple) == 2:
+                    combo_str = f"{combo_tuple[0]} + {combo_tuple[1]}"
+                else:
+                    combo_str = str(combo_tuple)
+                
+                combo_win_rate = (stats['total_wins'] / stats['total_matches'] * 100) if stats['total_matches'] > 0 else 0
+                win_rate_emoji = "🔥" if combo_win_rate >= 60 else "✅" if combo_win_rate >= 50 else "⚠️"
+                
+                # フィールドの値を構築
+                field_value = (
+                    f"{win_rate_emoji} **総合勝率:** {combo_win_rate:.1f}%\n"
+                    f" **総戦績:** {stats['total_matches']}戦 {stats['total_wins']}勝-{stats['total_losses']}敗\n"
+                )
+                
+                # 各クラスの選択詳細
+                field_value += "\n**投げられたクラス内訳:**\n"
+                for class_name, class_stats in stats['class_selection'].items():
+                    selection_rate = (class_stats['times_selected'] / stats['total_matches'] * 100) if stats['total_matches'] > 0 else 0
+                    class_win_rate = (class_stats['wins'] / class_stats['times_selected'] * 100) if class_stats['times_selected'] > 0 else 0
+                    
+                    field_value += (
+                        f"🎲 **{class_name}**: {class_stats['times_selected']}回 ({selection_rate:.1f}%)\n"
+                        f"　 → {class_stats['wins']}勝{class_stats['losses']}敗 (勝率{class_win_rate:.1f}%)\n"
+                    )
+                
+                current_embed.add_field(
+                    name=f"vs {combo_str}",
+                    value=field_value.strip(),
+                    inline=False
+                )
+                field_count += 1
+            
+            embeds.append(current_embed)
+            
+            # ページネーション付きで送信
+            if len(embeds) == 1:
+                message = await interaction.followup.send(embed=embeds[0], ephemeral=True)
+                await self._delete_message_after_delay(message, 300)
+            else:
+                # 複数ページの場合はページネーションビューを使用
+                from views.record_view import DetailedMatchHistoryPaginatorView
+                view = DetailedMatchHistoryPaginatorView(embeds)
+                message = await interaction.followup.send(embed=embeds[0], view=view, ephemeral=True)
+                await self._delete_message_after_delay(message, 600)  # ページネーション付きは長めに
         
-        message = await interaction.followup.send(detailed_message, ephemeral=True)
-        await self._delete_message_after_delay(message, 300)
+        else:
+            # 3つ以上のクラスが選択された場合（通常は発生しない）
+            message = await interaction.followup.send(
+                "クラスは1つまたは2つまで選択できます。", 
+                ephemeral=True
+            )
+            await self._delete_message_after_delay(message, 30)
+
     def _get_detailed_analysis_data_for_user(self, user_id: int, selected_classes: List[str], 
                                        season_id: Optional[int], season_name: Optional[str],
                                        date_range: Optional[tuple]) -> Dict[str, Dict[str, int]]:
@@ -678,3 +802,463 @@ class RecordViewModel:
             pass
         except Exception as e:
             self.logger.error(f"Error deleting message: {e}")
+
+    async def show_detailed_single_class_stats(self, interaction: discord.Interaction, user_id: int, 
+                                            selected_class: str, season_id: Optional[int] = None, 
+                                            date_range: Optional[tuple] = None):
+        """単一クラスの詳細戦績を表示（対戦相手のクラス別に集計）"""
+        user = self.user_model.get_user_by_discord_id(str(user_id))
+        if not user:
+            message = await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
+            await self._delete_message_after_delay(message, 300)
+            return
+        
+        # フィルター条件の説明
+        filter_desc = self._get_filter_description(season_id, date_range)
+        
+        # 分析データの取得
+        analysis_data = self._get_single_class_analysis_data(
+            user['id'], selected_class, season_id, date_range
+        )
+        
+        if not analysis_data:
+            message = await interaction.followup.send(
+                f"指定した条件での {selected_class} クラスの対戦データが見つかりませんでした。", 
+                ephemeral=True
+            )
+            await self._delete_message_after_delay(message, 300)
+            return
+        
+        # 全体の統計
+        total_matches = sum(data['total_matches'] for data in analysis_data)
+        total_wins = sum(data['my_wins'] for data in analysis_data)
+        total_losses = sum(data['opponent_wins'] for data in analysis_data)
+        overall_win_rate = (total_wins / total_matches * 100) if total_matches > 0 else 0
+        
+        # 勝率順にソート
+        sorted_data = sorted(analysis_data, key=lambda x: (x['win_rate'], x['my_wins']), reverse=True)
+        
+        # メッセージの作成
+        embed = discord.Embed(
+            title=f"{user['user_name']} の {selected_class} 単体での詳細戦績",
+            description=f" **対象:** {filter_desc}\n"
+                    f" **使用クラス:** {selected_class}\n"
+                    f" **全体勝率:** {overall_win_rate:.2f}%\n"
+                    f" **総戦績:** {total_matches}戦 {total_wins}勝-{total_losses}敗",
+            color=discord.Color.green()
+        )
+        
+        # 対戦相手のクラス別戦績
+        embed.add_field(name="", value="**【対戦相手のクラス別戦績】**", inline=False)
+        
+        for data in sorted_data:
+            win_rate_emoji = "🔥" if data['win_rate'] >= 60 else "✅" if data['win_rate'] >= 50 else "⚠️"
+            
+            embed.add_field(
+                name=f"vs {data['opponent_class']}",
+                value=(
+                    f"{win_rate_emoji} 勝率: {data['win_rate']:.1f}%\n"
+                    f" 戦績: {data['total_matches']}戦 {data['my_wins']}勝-{data['opponent_wins']}敗"
+                ),
+                inline=True
+            )
+        
+        message = await interaction.followup.send(embed=embed, ephemeral=True)
+        await self._delete_message_after_delay(message, 300)
+
+
+    async def show_detailed_dual_class_stats(self, interaction: discord.Interaction, user_id: int, 
+                                        selected_classes: List[str], season_id: Optional[int] = None, 
+                                        date_range: Optional[tuple] = None):
+        """2クラス組合せの詳細戦績を表示（投げられたクラスの組合せと選択率を含む）"""
+        user = self.user_model.get_user_by_discord_id(str(user_id))
+        if not user:
+            message = await interaction.followup.send("ユーザーが見つかりません。", ephemeral=True)
+            await self._delete_message_after_delay(message, 300)
+            return
+        
+        # フィルター条件の説明
+        filter_desc = self._get_filter_description(season_id, date_range)
+        
+        # 分析データの取得（投げられたクラスの組合せと選択クラス別）
+        analysis_data = self._get_dual_class_analysis_data(
+            user['id'], selected_classes, season_id, date_range
+        )
+        
+        if not analysis_data:
+            message = await interaction.followup.send(
+                f"指定した条件での {selected_classes[0]} + {selected_classes[1]} の対戦データが見つかりませんでした。", 
+                ephemeral=True
+            )
+            await self._delete_message_after_delay(message, 300)
+            return
+        
+        # 全体の統計
+        total_matches = sum(data['total_matches'] for data in analysis_data)
+        total_wins = sum(data['my_wins'] for data in analysis_data)
+        total_losses = sum(data['opponent_wins'] for data in analysis_data)
+        overall_win_rate = (total_wins / total_matches * 100) if total_matches > 0 else 0
+        
+        # 勝率順にソート
+        sorted_data = sorted(analysis_data, key=lambda x: (x['win_rate'], x['my_wins']), reverse=True)
+        
+        # エンベッドの作成（複数ページになる可能性があるため）
+        embeds = []
+        embed = discord.Embed(
+            title=f"{user['user_name']} の詳細戦績",
+            description=(
+                f" **対象:** {filter_desc}\n"
+                f" **使用クラス組合せ:** {selected_classes[0]} + {selected_classes[1]}\n"
+                f" **全体勝率:** {overall_win_rate:.2f}%\n"
+                f" **総戦績:** {total_matches}戦 {total_wins}勝-{total_losses}敗"
+            ),
+            color=discord.Color.blue()
+        )
+        
+        # 投げられたクラスの組合せごとに表示
+        current_embed = embed
+        field_count = 0
+        
+        for data in sorted_data:
+            if field_count >= 20:  # Embedの制限に近づいたら新しいページ
+                embeds.append(current_embed)
+                current_embed = discord.Embed(
+                    title=f"{user['user_name']} の詳細戦績（続き）",
+                    color=discord.Color.blue()
+                )
+                field_count = 0
+            
+            combo_str = f"{data['opponent_class_combo'][0]} + {data['opponent_class_combo'][1]}"
+            win_rate_emoji = "🔥" if data['win_rate'] >= 60 else "✅" if data['win_rate'] >= 50 else "⚠️"
+            
+            # 選択クラスの表示（どちらが投げられたか）
+            if data['opponent_selected_class']:
+                selected_emoji = "🎲"
+                selected_info = f"{selected_emoji} 投げられたクラス: {data['opponent_selected_class']}"
+            else:
+                selected_info = ""
+            
+            current_embed.add_field(
+                name=f"vs {combo_str}",
+                value=(
+                    f"{win_rate_emoji} 勝率: {data['win_rate']:.1f}%\n"
+                    f" 戦績: {data['total_matches']}戦 {data['my_wins']}勝-{data['opponent_wins']}敗\n"
+                    f"{selected_info}"
+                ).strip(),
+                inline=True
+            )
+            field_count += 1
+        
+        embeds.append(current_embed)
+        
+        # ページネーション付きで送信
+        if len(embeds) == 1:
+            message = await interaction.followup.send(embed=embeds[0], ephemeral=True)
+            await self._delete_message_after_delay(message, 300)
+        else:
+            # 複数ページの場合はページネーションビューを使用
+            from views.record_view import DetailedMatchHistoryPaginatorView
+            view = DetailedMatchHistoryPaginatorView(embeds)
+            message = await interaction.followup.send(embed=embeds[0], view=view, ephemeral=True)
+            await self._delete_message_after_delay(message, 600)  # ページネーション付きは長めに
+
+
+    def _get_filter_description(self, season_id: Optional[int], date_range: Optional[tuple]) -> str:
+        """フィルター条件の説明文を生成"""
+        if season_id is not None:
+            season_data = self.season_model.get_season_by_id(season_id)
+            return f"シーズン {season_data['season_name']}" if season_data else "指定シーズン"
+        elif date_range is not None:
+            start_date = date_range[0][:10] if date_range[0] else "開始日不明"
+            end_date = date_range[1][:10] if date_range[1] else "終了日不明"
+            return f"{start_date} ～ {end_date}"
+        else:
+            return "全シーズン"
+
+
+    def _get_single_class_analysis_data(self, user_id: int, selected_class: str, 
+                                    season_id: Optional[int] = None, 
+                                    date_range: Optional[tuple] = None) -> List[Dict]:
+        """単一クラスの分析データを取得（対戦相手のクラス別）"""
+        def _get_analysis_data(session):
+            from config.database import MatchHistory
+            from sqlalchemy import or_, and_
+            from config.settings import VALID_CLASSES
+            
+            # ベースクエリ
+            query = session.query(MatchHistory).filter(
+                MatchHistory.winner_user_id.isnot(None)
+            )
+            
+            # 期間フィルター
+            if season_id:
+                season = self.season_model.get_season_by_id(season_id)
+                if season:
+                    query = query.filter(MatchHistory.season_name == season['season_name'])
+            elif date_range:
+                start_date, end_date = date_range
+                query = query.filter(
+                    and_(
+                        MatchHistory.match_date >= start_date,
+                        MatchHistory.match_date <= end_date
+                    )
+                )
+            
+            # 指定クラスを使用した試合のみ
+            query = query.filter(
+                or_(
+                    MatchHistory.user1_selected_class == selected_class,
+                    MatchHistory.user2_selected_class == selected_class
+                )
+            )
+            
+            matches = query.all()
+            
+            # 対戦相手のクラス別に集計
+            opponent_stats = {}
+            for cls in VALID_CLASSES:
+                opponent_stats[cls] = {
+                    'total_matches': 0,
+                    'opponent_wins': 0,
+                    'my_wins': 0
+                }
+            
+            for match in matches:
+                if match.user1_selected_class == selected_class and match.user1_id == user_id:
+                    # user1が自分
+                    opponent_class = match.user2_selected_class
+                    if match.winner_user_id == user_id:
+                        opponent_stats[opponent_class]['my_wins'] += 1
+                    else:
+                        opponent_stats[opponent_class]['opponent_wins'] += 1
+                    opponent_stats[opponent_class]['total_matches'] += 1
+                elif match.user2_selected_class == selected_class and match.user2_id == user_id:
+                    # user2が自分
+                    opponent_class = match.user1_selected_class
+                    if match.winner_user_id == user_id:
+                        opponent_stats[opponent_class]['my_wins'] += 1
+                    else:
+                        opponent_stats[opponent_class]['opponent_wins'] += 1
+                    opponent_stats[opponent_class]['total_matches'] += 1
+            
+            # 結果を整形
+            result = []
+            for opponent_class, stats in opponent_stats.items():
+                if stats['total_matches'] > 0:
+                    win_rate = (stats['my_wins'] / stats['total_matches']) * 100
+                    result.append({
+                        'opponent_class': opponent_class,
+                        'total_matches': stats['total_matches'],
+                        'opponent_wins': stats['opponent_wins'],
+                        'my_wins': stats['my_wins'],
+                        'win_rate': win_rate
+                    })
+            
+            return result
+        
+        return self.match_model.safe_execute(_get_analysis_data) or []
+
+
+    def _get_analysis_data(self, selected_classes: List[str], season_name: Optional[str] = None, 
+                        date_range: Optional[tuple] = None) -> List[Dict]:
+        """投げられたクラスの分析データを取得"""
+        def _get_analysis_data(session):
+            from config.database import MatchHistory
+            from sqlalchemy import or_, and_
+            from itertools import combinations
+            
+            # ベースクエリ：完了した試合のみ
+            query = session.query(MatchHistory).filter(
+                MatchHistory.winner_user_id.isnot(None)
+            )
+            
+            # 期間フィルター
+            if season_name:
+                query = query.filter(MatchHistory.season_name == season_name)
+            elif date_range:
+                start_date, end_date = date_range
+                query = query.filter(
+                    and_(
+                        MatchHistory.match_date >= start_date,
+                        MatchHistory.match_date <= end_date
+                    )
+                )
+            
+            # 指定クラス組み合わせに関する対戦のみ
+            if len(selected_classes) == 1:
+                # 単体クラス
+                class_name = selected_classes[0]
+                query = query.filter(
+                    or_(
+                        # user1が指定クラスを選択
+                        MatchHistory.user1_selected_class == class_name,
+                        # user2が指定クラスを選択
+                        MatchHistory.user2_selected_class == class_name
+                    )
+                )
+            else:
+                # 2つのクラス組み合わせ
+                class1, class2 = selected_classes
+                query = query.filter(
+                    or_(
+                        # user1が指定クラス組み合わせを登録
+                        and_(
+                            or_(
+                                and_(MatchHistory.user1_class_a == class1, MatchHistory.user1_class_b == class2),
+                                and_(MatchHistory.user1_class_a == class2, MatchHistory.user1_class_b == class1)
+                            )
+                        ),
+                        # user2が指定クラス組み合わせを登録
+                        and_(
+                            or_(
+                                and_(MatchHistory.user2_class_a == class1, MatchHistory.user2_class_b == class2),
+                                and_(MatchHistory.user2_class_a == class2, MatchHistory.user2_class_b == class1)
+                            )
+                        )
+                    )
+                )
+            
+            matches = query.all()
+            
+            opponent_stats = {}
+            
+            if len(selected_classes) == 1:
+                # 単一クラス選択時：7種類のクラスそれぞれとの戦績を集計
+                from config.settings import VALID_CLASSES
+                class_name = selected_classes[0]
+                
+                # 各クラスに対して統計を初期化
+                for opponent_class in VALID_CLASSES:
+                    opponent_stats[opponent_class] = {
+                        'total_matches': 0,
+                        'opponent_wins': 0,
+                        'my_wins': 0
+                    }
+                
+                # マッチデータを分析
+                for match in matches:
+                    # 指定クラス使用者を特定
+                    my_user_id = None
+                    opponent_user_id = None
+                    opponent_selected_class = None
+                    
+                    if match.user1_selected_class == class_name:
+                        my_user_id = match.user1_id
+                        opponent_user_id = match.user2_id
+                        opponent_selected_class = match.user2_selected_class
+                    elif match.user2_selected_class == class_name:
+                        my_user_id = match.user2_id
+                        opponent_user_id = match.user1_id
+                        opponent_selected_class = match.user1_selected_class
+                    
+                    # 統計を更新
+                    if opponent_selected_class and opponent_selected_class in opponent_stats:
+                        opponent_stats[opponent_selected_class]['total_matches'] += 1
+                        
+                        if match.winner_user_id == my_user_id:
+                            opponent_stats[opponent_selected_class]['my_wins'] += 1
+                        else:
+                            opponent_stats[opponent_selected_class]['opponent_wins'] += 1
+                
+                # 結果を整形
+                result = []
+                for opponent_class, stats in opponent_stats.items():
+                    if stats['total_matches'] > 0:  # 対戦があったクラスのみ
+                        win_rate = (stats['my_wins'] / stats['total_matches']) * 100
+                        result.append({
+                            'opponent_class_combo': opponent_class,  # 単一クラス名
+                            'opponent_selected_class': opponent_class,
+                            'total_matches': stats['total_matches'],
+                            'opponent_wins': stats['opponent_wins'],
+                            'my_wins': stats['my_wins'],
+                            'win_rate': win_rate
+                        })
+                
+                return result
+                
+            else:
+                # 2つのクラス組み合わせ
+                # 全クラス組み合わせを生成
+                from config.settings import VALID_CLASSES
+                all_combinations = []
+                
+                # 2つのクラスの組み合わせ（C(7,2) = 21通り）
+                for combo in combinations(VALID_CLASSES, 2):
+                    combo_key = tuple(sorted(combo))
+                    all_combinations.append(combo_key)
+                
+                # 各組み合わせに対して、どちらを選択したかで分ける
+                for combo in all_combinations:
+                    for selected_class in combo:
+                        key = (combo, selected_class)
+                        opponent_stats[key] = {
+                            'total_matches': 0,
+                            'opponent_wins': 0,
+                            'my_wins': 0
+                        }
+                
+                # マッチデータを分析
+                for match in matches:
+                    # 指定クラス使用者を特定
+                    my_user_id = None
+                    opponent_user_id = None
+                    opponent_class_combo = None
+                    opponent_selected_class = None
+                    
+                    class1, class2 = selected_classes
+                    class_set = {class1, class2}
+                    
+                    if match.user1_class_a and match.user1_class_b:
+                        user1_class_set = {match.user1_class_a, match.user1_class_b}
+                    else:
+                        user1_class_set = set()
+                    
+                    if match.user2_class_a and match.user2_class_b:
+                        user2_class_set = {match.user2_class_a, match.user2_class_b}
+                    else:
+                        user2_class_set = set()
+                    
+                    if user1_class_set == class_set:
+                        my_user_id = match.user1_id
+                        opponent_user_id = match.user2_id
+                        if match.user2_class_a and match.user2_class_b:
+                            opponent_class_combo = tuple(sorted([match.user2_class_a, match.user2_class_b]))
+                            opponent_selected_class = match.user2_selected_class
+                    elif user2_class_set == class_set:
+                        my_user_id = match.user2_id
+                        opponent_user_id = match.user1_id
+                        if match.user1_class_a and match.user1_class_b:
+                            opponent_class_combo = tuple(sorted([match.user1_class_a, match.user1_class_b]))
+                            opponent_selected_class = match.user1_selected_class
+                    
+                    # 統計を更新
+                    if (opponent_class_combo and opponent_selected_class and 
+                        opponent_class_combo in [combo for combo, _ in opponent_stats.keys()]):
+                        
+                        key = (opponent_class_combo, opponent_selected_class)
+                        if key in opponent_stats:
+                            opponent_stats[key]['total_matches'] += 1
+                            
+                            if match.winner_user_id == my_user_id:
+                                opponent_stats[key]['my_wins'] += 1
+                            else:
+                                opponent_stats[key]['opponent_wins'] += 1
+                
+                # 結果を整形
+                result = []
+                for (combo, selected_class), stats in opponent_stats.items():
+                    if stats['total_matches'] > 0:
+                        combo_str = f"{combo[0]} + {combo[1]}"
+                        win_rate = (stats['my_wins'] / stats['total_matches']) * 100
+                        result.append({
+                            'opponent_class_combo': combo,  # タプル形式で保持
+                            'opponent_selected_class': selected_class,
+                            'total_matches': stats['total_matches'],
+                            'opponent_wins': stats['opponent_wins'],
+                            'my_wins': stats['my_wins'],
+                            'win_rate': win_rate
+                        })
+                
+                return result
+        
+        return self.match_model.safe_execute(_get_analysis_data) or []

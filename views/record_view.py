@@ -630,255 +630,7 @@ class DetailedMatchHistoryView(View):
             logging.getLogger(self.__class__.__name__).error(traceback.format_exc())
             await interaction.followup.send("詳細対戦履歴の取得中にエラーが発生しました。", ephemeral=True)
 
-class DetailedSeasonSelectView(View):
-    """詳細戦績用のシーズン選択View"""
-    
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(DetailedSeasonSelect())
 
-# views/record_view.py の DetailedSeasonSelect クラスの修正版
-
-class DetailedSeasonSelect(Select):
-    """詳細戦績用のシーズン選択セレクト"""
-    
-    def __init__(self):
-        self.logger = logging.getLogger(self.__class__.__name__)
-        
-        season_model = SeasonModel()
-        current_season = season_model.get_current_season()
-        past_seasons = season_model.get_past_seasons()
-        
-        options = [discord.SelectOption(label="全シーズン", value="all")]
-
-        options.append(discord.SelectOption(
-            label="日付で絞り込む", 
-            value="date_range",
-        ))
-        
-        # 現在のシーズンを追加（修正）
-        if current_season:
-            options.append(discord.SelectOption(
-                label=f"{current_season.season_name} (現在)", 
-                value=f"season_{current_season.id}",
-                emoji="🌟"
-            ))
-        
-        # 過去のシーズンを追加
-        if past_seasons:
-            for season in past_seasons:
-                options.append(discord.SelectOption(
-                    label=season['season_name'], 
-                    value=f"season_{season['id']}"
-                ))
-        
-        super().__init__(
-            placeholder="シーズンを選択してください...", 
-            options=options if options else [discord.SelectOption(label="シーズンなし", value="none")]
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        """詳細シーズン選択のコールバック"""
-        selection = self.values[0]
-        
-        if selection == "all":
-            # 全シーズンを選択した場合
-            await interaction.response.send_message(
-                content="クラスを選択してください：",
-                view=DetailedClassSelectView(season_id=None, date_range=None),
-                ephemeral=True
-            )
-        elif selection == "date_range":
-            # 日付範囲を選択した場合
-            modal = DateRangeInputModal()
-            await interaction.response.send_modal(modal)
-        elif selection.startswith("season_"):
-            # 特定のシーズンを選択した場合
-            season_id = int(selection.split("_")[1])
-            season_model = SeasonModel()
-            season_data = season_model.get_season_by_id(season_id)
-            season_name = season_data['season_name'] if season_data else "不明"
-            
-            await interaction.response.send_message(
-                content=f"クラスを選択してください：",
-                view=DetailedClassSelectView(season_id=season_id, date_range=None),
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message("無効な選択です。", ephemeral=True)
-
-class DateRangeInputModal(discord.ui.Modal):
-    """日付範囲入力用のモーダル"""
-    
-    def __init__(self):
-        super().__init__(title="日付範囲を入力してください")
-        self.logger = logging.getLogger(self.__class__.__name__)
-        
-        # 現在の日付を取得してヒントとして使用
-        from datetime import datetime, timedelta
-        from config.settings import JST
-        
-        today = datetime.now(JST)
-        today_str = today.strftime('%Y-%m-%d')
-        week_ago_str = (today - timedelta(days=7)).strftime('%Y-%m-%d')
-        
-        self.start_date_input = discord.ui.InputText(
-            label="開始日",
-            placeholder=f"例: {week_ago_str} (YYYY-MM-DD形式)",
-            required=True,
-            max_length=10
-        )
-        self.add_item(self.start_date_input)
-        
-        self.end_date_input = discord.ui.InputText(
-            label="終了日", 
-            placeholder=f"例: {today_str} (YYYY-MM-DD形式)",
-            required=True,
-            max_length=10
-        )
-        self.add_item(self.end_date_input)
-    
-    async def callback(self, interaction: discord.Interaction):
-        """モーダル送信のコールバック"""
-        start_date_str = self.start_date_input.value.strip()
-        end_date_str = self.end_date_input.value.strip()
-        
-        self.logger.info(f"Date range input: {start_date_str} to {end_date_str} by user {interaction.user.id}")
-        
-        # 日付形式のバリデーション
-        try:
-            from datetime import datetime
-            
-            # 日付のパース
-            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-            
-            # 開始日が終了日より後でないかチェック
-            if start_date > end_date:
-                await interaction.response.send_message(
-                    "❌ **エラー:** 開始日は終了日より前の日付を指定してください。\n"
-                    f"入力された値: 開始日 `{start_date_str}`, 終了日 `{end_date_str}`",
-                    ephemeral=True
-                )
-                return
-            
-            # 未来の日付でないかチェック
-            from config.settings import JST
-            now = datetime.now(JST).replace(tzinfo=None)  # タイムゾーン情報を削除
-            
-            if end_date > now:
-                await interaction.response.send_message(
-                    "❌ **エラー:** 終了日は今日以前の日付を指定してください。\n"
-                    f"今日の日付: `{now.strftime('%Y-%m-%d')}`",
-                    ephemeral=True
-                )
-                return
-            
-            # 日数を計算
-            days_diff = (end_date - start_date).days
-            
-            # ISO形式の文字列に変換（時刻情報を追加）
-            start_date_iso = f"{start_date_str} 00:00:00"
-            end_date_iso = f"{end_date_str} 23:59:59"
-            
-            date_range = (start_date_iso, end_date_iso)
-            range_description = f"{start_date_str} ～ {end_date_str}"
-            
-            self.logger.info(f"Valid date range processed: {range_description} ({days_diff + 1}日間)")
-            
-            # クラス選択を表示
-            await interaction.response.send_message(
-                content=f"✅ **日付範囲設定完了**\n"
-                        f"📅 対象期間: **{range_description}** ({days_diff + 1}日間)\n"
-                        f"🎯 次に詳細戦績のクラスを選択してください:",
-                view=DetailedClassSelectView(season_id=None, date_range=date_range),
-                ephemeral=True
-            )
-            
-        except ValueError as e:
-            self.logger.warning(f"Invalid date format from user {interaction.user.id}: {start_date_str}, {end_date_str}")
-            await interaction.response.send_message(
-                "❌ **エラー:** 日付の形式が正しくありません。\n\n"
-                "**正しい形式:** `YYYY-MM-DD`\n"
-                "**例:** `2024-01-01`\n"
-                f"**入力された値:** 開始日 `{start_date_str}`, 終了日 `{end_date_str}`\n\n"
-                "年は4桁、月と日は2桁で入力してください。",
-                ephemeral=True
-            )
-        except Exception as e:
-            self.logger.error(f"Error in date range input from user {interaction.user.id}: {e}")
-            await interaction.response.send_message(
-                "❌ 日付の処理中にエラーが発生しました。\n"
-                "入力形式を確認して再度お試しください。",
-                ephemeral=True
-            )
-
-class DetailedClassSelectView(View):
-    """詳細戦績用のクラス選択View"""
-    
-    def __init__(self, season_id: Optional[int] = None, date_range: Optional[tuple] = None):
-        super().__init__(timeout=None)
-        self.add_item(DetailedClassSelect(season_id, date_range))
-
-class DetailedClassSelect(Select):
-    """詳細戦績用のクラス選択セレクト（1つまたは2つ選択可能）"""
-    
-    def __init__(self, season_id: Optional[int] = None, date_range: Optional[tuple] = None):
-        self.season_id = season_id
-        self.date_range = date_range
-        self.logger = logging.getLogger(self.__class__.__name__)
-        
-        # データベースからクラス名を取得
-        user_model = UserModel()
-        valid_classes = user_model.get_valid_classes()
-        
-        # 全クラスを一番上に置く
-        options = [discord.SelectOption(label="全クラス", value="all_classes")]
-        options.extend([discord.SelectOption(label=cls, value=cls) for cls in valid_classes])
-        
-        super().__init__(
-            placeholder="クラスを選択してください（1つまたは2つ）...", 
-            min_values=1, 
-            max_values=min(2, len(options)),  # 最大2つまで選択可能
-            options=options
-        )
-    
-    async def callback(self, interaction: discord.Interaction):
-        """詳細クラス選択のコールバック（修正版）"""
-        selected_classes = self.values
-        user_id = interaction.user.id
-        
-        # インタラクションのレスポンスを一度行う
-        await interaction.response.defer(ephemeral=True)
-        
-        try:
-            # RecordViewModelを遅延インポート
-            from viewmodels.record_vm import RecordViewModel
-            record_vm = RecordViewModel()
-            
-            if "all_classes" in selected_classes:
-                # 全クラスを選択した場合
-                if self.season_id:
-                    await record_vm.show_season_stats(interaction, user_id, self.season_id)
-                elif self.date_range:
-                    await record_vm.show_date_range_stats(interaction, user_id, self.date_range)
-                else:
-                    await record_vm.show_all_time_stats(interaction, user_id)
-            else:
-                # 特定のクラス（1つまたは2つ）を選択した場合（修正：必ず詳細戦績を表示）
-                await record_vm.show_detailed_class_stats(interaction, user_id, selected_classes, self.season_id, self.date_range)
-        
-        except Exception as e:
-            self.logger.error(f"Error in detailed class selection callback: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
-            await interaction.followup.send("エラーが発生しました。", ephemeral=True)
-        
-        # インタラクションメッセージを削除する
-        try:
-            await interaction.delete_original_response()
-        except discord.errors.NotFound:
-            pass
 
 class RecordClassSelectView(View):
     """戦績用クラス選択View（単一クラスまたは全クラスのみ選択可能）"""
@@ -1186,50 +938,6 @@ class Last50RecordButton(Button):
             import traceback
             self.logger.error(traceback.format_exc())
             await interaction.followup.send("戦績の取得中にエラーが発生しました。", ephemeral=True)
-
-class DetailedMatchHistoryPaginatorView(View):
-    """詳細対戦履歴のページネーションView"""
-    
-    def __init__(self, embeds: List[discord.Embed]):
-        super().__init__(timeout=600)
-        self.embeds = embeds
-        self.current = 0
-        self.logger = logging.getLogger(self.__class__.__name__)
-    
-    @discord.ui.button(label="⬅️ 前へ", style=discord.ButtonStyle.primary)
-    async def previous(self, button: Button, interaction: discord.Interaction):
-        """前のページへ"""
-        if self.current > 0:
-            self.current -= 1
-            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
-        else:
-            await interaction.response.defer()
-    
-    @discord.ui.button(label="➡️ 次へ", style=discord.ButtonStyle.primary)
-    async def next(self, button: Button, interaction: discord.Interaction):
-        """次のページへ"""
-        if self.current < len(self.embeds) - 1:
-            self.current += 1
-            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
-        else:
-            await interaction.response.defer()
-    
-    @discord.ui.button(label="🔢 ページ情報", style=discord.ButtonStyle.secondary)
-    async def page_info(self, button: Button, interaction: discord.Interaction):
-        """現在のページ情報を表示"""
-        await interaction.response.send_message(
-            f"現在のページ: {self.current + 1} / {len(self.embeds)}", 
-            ephemeral=True
-        )
-    
-    async def on_timeout(self):
-        """タイムアウト時の処理"""
-        try:
-            # ボタンを無効化
-            for item in self.children:
-                item.disabled = True
-        except Exception as e:
-            self.logger.error(f"Error in on_timeout: {e}")
 
 class OpponentClassAnalysisView(View):
     
@@ -1990,35 +1698,48 @@ class DetailedRecordView(View):
     def __init__(self):
         super().__init__(timeout=None)
         
-        # 既存の詳細な戦績ボタン
-        detailed_record_button = Button(label="詳細な戦績", style=discord.ButtonStyle.success)
-        async def detailed_record_callback(interaction):
-            await self.show_detailed_season_select(interaction)
-        detailed_record_button.callback = detailed_record_callback
-        self.add_item(detailed_record_button)
+        # 1つのクラスを選択する詳細戦績ボタン
+        single_class_button = Button(
+            label="詳細戦績（単一クラス）", 
+            style=discord.ButtonStyle.success,
+        )
+        async def single_class_callback(interaction):
+            await self.show_single_class_season_select(interaction)
+        single_class_button.callback = single_class_callback
+        self.add_item(single_class_button)
         
+        # 2つのクラスを選択する詳細戦績ボタン
+        dual_class_button = Button(
+            label="詳細戦績（2クラス組合せ）", 
+            style=discord.ButtonStyle.primary,
+        )
+        async def dual_class_callback(interaction):
+            await self.show_dual_class_season_select(interaction)
+        dual_class_button.callback = dual_class_callback
+        self.add_item(dual_class_button)
+        
+        # 投げられたクラス分析ボタン（勝利数順）
         analysis_wins_button = Button(
             label="投げられたクラス分析（勝利数順）", 
-            style=discord.ButtonStyle.primary,
-            emoji="🏆"
+            style=discord.ButtonStyle.secondary,
         )
         async def analysis_wins_callback(interaction):
             await self.show_analysis_season_select(interaction, "wins")
         analysis_wins_button.callback = analysis_wins_callback
         self.add_item(analysis_wins_button)
         
+        # 投げられたクラス分析ボタン（勝率順）
         analysis_rate_button = Button(
             label="投げられたクラス分析（勝率順）", 
             style=discord.ButtonStyle.secondary,
-            emoji="📊"
         )
         async def analysis_rate_callback(interaction):
             await self.show_analysis_season_select(interaction, "rate")
         analysis_rate_button.callback = analysis_rate_callback
         self.add_item(analysis_rate_button)
     
-    async def show_detailed_season_select(self, interaction: discord.Interaction):
-        """詳細戦績のシーズン選択を表示"""
+    async def show_single_class_season_select(self, interaction: discord.Interaction):
+        """単一クラス詳細戦績のシーズン選択を表示"""
         user_model = UserModel()
         user = user_model.get_user_by_discord_id(str(interaction.user.id))
         
@@ -2026,14 +1747,29 @@ class DetailedRecordView(View):
             await interaction.response.send_message("ユーザーが見つかりません。", ephemeral=True)
             return
         
-        # 詳細戦績用のシーズン選択を表示
         await interaction.response.send_message(
-            content="詳細戦績のシーズンを選択してください:", 
-            view=DetailedSeasonSelectView(), 
+            content="単一クラス詳細戦績のシーズンを選択してください:", 
+            view=DetailedSeasonSelectView(class_mode="single"), 
+            ephemeral=True
+        )
+    
+    async def show_dual_class_season_select(self, interaction: discord.Interaction):
+        """2クラス組合せ詳細戦績のシーズン選択を表示"""
+        user_model = UserModel()
+        user = user_model.get_user_by_discord_id(str(interaction.user.id))
+        
+        if not user:
+            await interaction.response.send_message("ユーザーが見つかりません。", ephemeral=True)
+            return
+        
+        await interaction.response.send_message(
+            content="2クラス組合せ詳細戦績のシーズンを選択してください:", 
+            view=DetailedSeasonSelectView(class_mode="dual"), 
             ephemeral=True
         )
     
     async def show_analysis_season_select(self, interaction: discord.Interaction, sort_type: str):
+        """投げられたクラス分析のシーズン選択を表示"""
         user_model = UserModel()
         user = user_model.get_user_by_discord_id(str(interaction.user.id))
         
@@ -2047,3 +1783,341 @@ class DetailedRecordView(View):
             view=OpponentAnalysisSeasonSelectView(sort_type), 
             ephemeral=True
         )
+
+
+class DetailedSeasonSelectView(View):
+    
+    def __init__(self, class_mode: str = "single"):
+        super().__init__(timeout=None)
+        self.class_mode = class_mode  # "single" or "dual"
+        self.add_item(DetailedSeasonSelect(class_mode))
+
+
+class DetailedSeasonSelect(Select):
+    
+    def __init__(self, class_mode: str = "single"):
+        self.class_mode = class_mode
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 現在のシーズンと過去のシーズンを取得
+        season_model = SeasonModel()
+        current_season = season_model.get_current_season()
+        past_seasons = season_model.get_past_seasons()
+        
+        # 全シーズンオプションを一番上に
+        options = [discord.SelectOption(label="全シーズン", value="all")]
+        
+        # 現在のシーズンを追加
+        if current_season:
+            options.append(discord.SelectOption(
+                label=current_season.season_name, 
+                value=f"current_{current_season.id}"
+            ))
+        
+        # 過去のシーズンを追加
+        for season in past_seasons:
+            options.append(discord.SelectOption(
+                label=season['season_name'], 
+                value=f"past_{season['id']}"
+            ))
+        
+        # 日付で絞り込むオプションを追加
+        options.append(discord.SelectOption(label="日付で絞り込む", value="date_range"))
+        
+        super().__init__(
+            placeholder="シーズンを選択してください...", 
+            min_values=1, 
+            max_values=1, 
+            options=options
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """シーズン選択のコールバック"""
+        selected_value = self.values[0]
+        
+        if selected_value == "date_range":
+            # 日付範囲入力モーダルを表示
+            modal = DateRangeInputModal(self.class_mode)
+            await interaction.response.send_modal(modal)
+        else:
+            # シーズンIDを抽出
+            if selected_value == "all":
+                season_id = None
+            elif selected_value.startswith("current_"):
+                season_id = int(selected_value.split("_")[1])
+            elif selected_value.startswith("past_"):
+                season_id = int(selected_value.split("_")[1])
+            else:
+                season_id = None
+            
+            # クラス選択を表示
+            await interaction.response.send_message(
+                content="クラスを選択してください:", 
+                view=DetailedClassSelectView(season_id, self.class_mode), 
+                ephemeral=True
+            )
+
+
+class DateRangeInputModal(discord.ui.Modal):
+    """日付範囲入力モーダル"""
+    
+    def __init__(self, class_mode: str = "single"):
+        super().__init__(title="日付範囲を入力")
+        self.class_mode = class_mode  # "single" or "dual"
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # 開始日入力フィールド
+        self.start_date = discord.ui.TextInput(
+            label="開始日",
+            placeholder="YYYY-MM-DD 形式で入力（例: 2024-01-01）",
+            required=True,
+            max_length=10
+        )
+        self.add_item(self.start_date)
+        
+        # 終了日入力フィールド
+        self.end_date = discord.ui.TextInput(
+            label="終了日",
+            placeholder="YYYY-MM-DD 形式で入力（例: 2024-12-31）",
+            required=True,
+            max_length=10
+        )
+        self.add_item(self.end_date)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        """モーダル送信のコールバック"""
+        start_date_str = self.start_date.value.strip()
+        end_date_str = self.end_date.value.strip()
+        
+        self.logger.info(f"Date range input: {start_date_str} to {end_date_str} by user {interaction.user.id}")
+        
+        # 日付形式のバリデーション
+        try:
+            from datetime import datetime
+            
+            # 日付のパース
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            
+            # 開始日が終了日より後でないかチェック
+            if start_date > end_date:
+                await interaction.response.send_message(
+                    "❌ **エラー:** 開始日は終了日より前の日付を指定してください。\n"
+                    f"入力された値: 開始日 `{start_date_str}`, 終了日 `{end_date_str}`",
+                    ephemeral=True
+                )
+                return
+            
+            # 未来の日付でないかチェック
+            from config.settings import JST
+            now = datetime.now(JST).replace(tzinfo=None)  # タイムゾーン情報を削除
+            
+            if end_date > now:
+                await interaction.response.send_message(
+                    "❌ **エラー:** 終了日は今日以前の日付を指定してください。\n"
+                    f"今日の日付: `{now.strftime('%Y-%m-%d')}`",
+                    ephemeral=True
+                )
+                return
+            
+            # 日数を計算
+            days_diff = (end_date - start_date).days
+            
+            # ISO形式の文字列に変換（時刻情報を追加）
+            start_date_iso = f"{start_date_str} 00:00:00"
+            end_date_iso = f"{end_date_str} 23:59:59"
+            
+            date_range = (start_date_iso, end_date_iso)
+            range_description = f"{start_date_str} ～ {end_date_str}"
+            
+            self.logger.info(f"Valid date range processed: {range_description} ({days_diff + 1}日間)")
+            
+            # クラス選択を表示
+            await interaction.response.send_message(
+                content=f"✅ **日付範囲設定完了**\n"
+                        f"📅 対象期間: **{range_description}** ({days_diff + 1}日間)\n"
+                        f"🎯 次に詳細戦績のクラスを選択してください:",
+                view=DetailedClassSelectView(season_id=None, class_mode=self.class_mode, date_range=date_range),
+                ephemeral=True
+            )
+            
+        except ValueError as e:
+            self.logger.warning(f"Invalid date format from user {interaction.user.id}: {start_date_str}, {end_date_str}")
+            await interaction.response.send_message(
+                "❌ **エラー:** 日付の形式が正しくありません。\n\n"
+                "**正しい形式:** `YYYY-MM-DD`\n"
+                "**例:** `2024-01-01`\n"
+                f"**入力された値:** 開始日 `{start_date_str}`, 終了日 `{end_date_str}`\n\n"
+                "年は4桁、月と日は2桁で入力してください。",
+                ephemeral=True
+            )
+        except Exception as e:
+            self.logger.error(f"Error in date range input from user {interaction.user.id}: {e}")
+            await interaction.response.send_message(
+                "❌ 日付の処理中にエラーが発生しました。\n"
+                "入力形式を確認して再度お試しください。",
+                ephemeral=True
+            )
+
+
+class DetailedClassSelectView(View):
+    """詳細戦績用クラス選択View"""
+    
+    def __init__(self, season_id: Optional[int] = None, class_mode: str = "single", date_range: Optional[tuple] = None):
+        super().__init__(timeout=None)
+        self.class_mode = class_mode
+        
+        if class_mode == "single":
+            self.add_item(SingleClassSelect(season_id, date_range))
+        else:  # dual
+            self.add_item(DualClassSelect(season_id, date_range))
+
+
+class SingleClassSelect(Select):
+    """単一クラス選択セレクト"""
+    
+    def __init__(self, season_id: Optional[int] = None, date_range: Optional[tuple] = None):
+        self.season_id = season_id
+        self.date_range = date_range
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # データベースからクラス名を取得
+        user_model = UserModel()
+        valid_classes = user_model.get_valid_classes()
+        
+        # 全クラスオプションを追加
+        options = [discord.SelectOption(label="全クラス", value="all_classes")]
+        options.extend([discord.SelectOption(label=cls, value=cls) for cls in valid_classes])
+        
+        super().__init__(
+            placeholder="クラスを1つ選択してください...", 
+            min_values=1, 
+            max_values=1, 
+            options=options
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """単一クラス選択のコールバック"""
+        selected_value = self.values[0]
+        user_id = interaction.user.id
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            from viewmodels.record_vm import RecordViewModel
+            record_vm = RecordViewModel()
+            
+            if selected_value == "all_classes":
+                # 全クラスの場合
+                if self.season_id:
+                    await record_vm.show_season_stats(interaction, user_id, self.season_id)
+                elif self.date_range:
+                    await record_vm.show_date_range_stats(interaction, user_id, self.date_range)
+                else:
+                    await record_vm.show_all_time_stats(interaction, user_id)
+            else:
+                # 特定の単一クラスを選択した場合（リストとして渡す）
+                await record_vm.show_detailed_class_stats(
+                    interaction, user_id, [selected_value], self.season_id, self.date_range
+                )
+        
+        except Exception as e:
+            self.logger.error(f"Error in single class selection callback: {e}")
+            await interaction.followup.send("エラーが発生しました。", ephemeral=True)
+        
+        try:
+            await interaction.delete_original_response()
+        except discord.errors.NotFound:
+            pass
+
+
+class DualClassSelect(Select):
+    """2クラス選択セレクト"""
+    
+    def __init__(self, season_id: Optional[int] = None, date_range: Optional[tuple] = None):
+        self.season_id = season_id
+        self.date_range = date_range
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # データベースからクラス名を取得
+        user_model = UserModel()
+        valid_classes = user_model.get_valid_classes()
+        
+        options = [discord.SelectOption(label=cls, value=cls) for cls in valid_classes]
+        
+        super().__init__(
+            placeholder="クラスを2つ選択してください...", 
+            min_values=2, 
+            max_values=2, 
+            options=options
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """2クラス選択のコールバック"""
+        selected_classes = self.values
+        user_id = interaction.user.id
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            from viewmodels.record_vm import RecordViewModel
+            record_vm = RecordViewModel()
+            
+            # 2つのクラスを選択した場合（詳細戦績モード）
+            await record_vm.show_detailed_class_stats(
+                interaction, user_id, selected_classes, self.season_id, self.date_range
+            )
+        
+        except Exception as e:
+            self.logger.error(f"Error in dual class selection callback: {e}")
+            await interaction.followup.send("エラーが発生しました。", ephemeral=True)
+        
+        try:
+            await interaction.delete_original_response()
+        except discord.errors.NotFound:
+            pass
+
+
+class DetailedMatchHistoryPaginatorView(View):
+    """詳細対戦履歴のページネーションView"""
+    
+    def __init__(self, embeds: List[discord.Embed]):
+        super().__init__(timeout=600)
+        self.embeds = embeds
+        self.current = 0
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    @discord.ui.button(label="⬅️ 前へ", style=discord.ButtonStyle.primary)
+    async def previous(self, button: Button, interaction: discord.Interaction):
+        """前のページへ"""
+        if self.current > 0:
+            self.current -= 1
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+        else:
+            await interaction.response.defer()
+    
+    @discord.ui.button(label="➡️ 次へ", style=discord.ButtonStyle.primary)
+    async def next(self, button: Button, interaction: discord.Interaction):
+        """次のページへ"""
+        if self.current < len(self.embeds) - 1:
+            self.current += 1
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+        else:
+            await interaction.response.defer()
+    
+    @discord.ui.button(label="🔢 ページ情報", style=discord.ButtonStyle.secondary)
+    async def page_info(self, button: Button, interaction: discord.Interaction):
+        """現在のページ情報を表示"""
+        await interaction.response.send_message(
+            f"現在のページ: {self.current + 1} / {len(self.embeds)}", 
+            ephemeral=True
+        )
+    
+    async def on_timeout(self):
+        """タイムアウト時の処理"""
+        try:
+            # ボタンを無効化
+            for item in self.children:
+                item.disabled = True
+        except Exception as e:
+            self.logger.error(f"Error in on_timeout: {e}")

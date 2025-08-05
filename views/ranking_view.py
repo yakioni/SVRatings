@@ -238,7 +238,7 @@ class RankingUpdateView(View):
         # セマフォで同時リクエストを制限
         self.semaphore = asyncio.Semaphore(5)
     
-    @discord.ui.button(label="👑 ランキング更新", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="ランキング更新", style=discord.ButtonStyle.secondary)
     async def update_rating_button(self, button: Button, interaction: discord.Interaction):
         """レーティング更新ボタンのコールバック"""
         async with self.semaphore:
