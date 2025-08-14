@@ -286,11 +286,17 @@ class PremiumModal(Modal):
         super().__init__(title="Premium機能を解放する")
         self.logger = logging.getLogger(self.__class__.__name__)
         
+        self.note_account_input = InputText(
+            label="noteのアカウント名を入力してください",
+            placeholder="noteのアカウント名を入力",
+            required=True
+        )
         self.password_input = InputText(
             label="合言葉を入力してください",
             placeholder="Premium機能の合言葉を入力",
             required=True
         )
+        self.add_item(self.note_account_input)
         self.add_item(self.password_input)
 
     async def callback(self, interaction: discord.Interaction):
